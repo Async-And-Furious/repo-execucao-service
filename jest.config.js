@@ -21,6 +21,7 @@ export default {
     '!src/auth/dto/*.ts',
     '!src/auth/strategies/*.ts',
     '!src/auth/enums/*.ts',
+    '!src/**/dto/*.ts',
   ],
   coverageDirectory: './coverage',
   testEnvironment: 'node',

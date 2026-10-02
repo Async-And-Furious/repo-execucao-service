@@ -42,5 +42,4 @@ Manifests em `k8s/`: namespace `execucao`, Deployment, Service, migration Job, c
 ## Pendencias conhecidas
 
 - OpenAPI exportado e versionado neste README (depende do deploy em HML).
-- Cobertura abaixo de 80%: os specs de health, filtro de excecoes, `PrismaService` e excecoes de dominio nao foram copiados do OS Service. O gate e da Feature de Testes e Pipeline.
-- Divergencias do template do OS Service: o `jwt.config.ts` copiado foi reduzido a verificacao (sem assinatura) e o `jwt.config.spec.ts` nao veio junto.
+- Divergencias do template do OS Service: o `jwt.config.ts` copiado foi reduzido a verificacao (sem assinatura) e o `jwt.config.spec.ts` foi reescrito para o contrato de verificacao.
