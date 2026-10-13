@@ -1,0 +1,20 @@
+// Schema do servico de Execucao e Producao.
+// Nenhum model herdado do monolito. O Prisma 5 nao gera o client com schema sem models, entao
+// ProcessedEvent (idempotencia dos eventos Kafka por eventId) e o unico model inicial.
+// Os models de execucao entram na Feature de Fila e Dominio.
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model ProcessedEvent {
+  eventId     String   @id @map("event_id")
+  processedAt DateTime @default(now()) @map("processed_at")
+
+  @@map("processed_events")
+}
