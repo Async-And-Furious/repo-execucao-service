@@ -20,7 +20,34 @@ PostgreSQL, banco `execucao_producao`, role `execucao_app` na instancia RDS unic
 
 ## Autenticacao
 
-`src/auth/` e a variante stateless do JWT local (ADR-0021): `JwtStrategy` valida localmente e devolve `{ id: sub, email, role }`, sem Prisma e sem `AuthService`. Token sem `role` vira `Role.CLIENTE` e recebe 403 em rota com `@Roles`. Role fora do enum e rejeitada com 401. O `sub` fica em `request.user.id`, via `@CurrentUser('id')`, para uso como `responsavelId`. Rota de validacao: `GET /api/v1/execucao/me` com `@Roles(Role.MECANICO)`.
+`src/auth/` e a variante stateless do JWT local (ADR-0021): `JwtStrategy` valida localmente e devolve `{ id: sub, email, role }`, sem Prisma e sem `AuthService`. Token sem `role` vira `Role.CLIENTE` e recebe 403 em rota com `@Roles`. Role fora do enum e rejeitada com 401. O `sub` fica em `request.user.id`, via `@CurrentUser('id')`, e e gravado como `responsavelId` em `iniciar-diagnostico`.
+
+## Rotas
+
+Todas com `@Roles(Role.MECANICO)`. A `Execucao` nasce quando o servico consome `OrdemServicoRecebida` (Feature de Eventos); nao existe rota de criacao.
+
+| Metodo | Rota | Efeito | Evento |
+|---|---|---|---|
+| `GET` | `/api/v1/execucoes?status=&responsavelId=` | Fila ordenada por `createdAt`. Sem `status`: `AGUARDANDO_DIAGNOSTICO` e `AGUARDANDO_REPARO` | |
+| `PATCH` | `/api/v1/execucoes/{id}/iniciar-diagnostico` | `AGUARDANDO_DIAGNOSTICO` para `EM_DIAGNOSTICO`, grava `responsavelId` | `DiagnosticoIniciado` |
+| `PATCH` | `/api/v1/execucoes/{id}/iniciar-reparo` | `AGUARDANDO_REPARO` para `EM_REPARO` | `ExecucaoIniciada` |
+| `PATCH` | `/api/v1/execucoes/{id}/concluir` | `EM_REPARO` para `CONCLUIDA` | `ExecucaoConcluida` |
+
+Transicao invalida responde 400; id inexistente, 404. Os eventos por enquanto so vao para o log (`LogExecucaoEventPublisher`); a publicacao no Kafka entra na Feature de Eventos.
+
+## Seed
+
+`prisma/seed.sql` cria 6 execucoes (uma por estado nao cancelado, mais uma segunda em `AGUARDANDO_DIAGNOSTICO`), com `responsavelId = mec-seed` onde ja houve diagnostico. Reexecutavel.
+
+```bash
+pnpm db:seed
+```
+
+Em HML, depois do migration Job:
+
+```bash
+kubectl -n execucao exec deploy/execucao-api -- node_modules/.bin/prisma db execute --file prisma/seed.sql --schema prisma/schema.prisma
+```
 
 ## Rodando localmente
 
@@ -29,6 +56,7 @@ cp .env.example .env
 docker compose -f docker-compose.dependencies.yml up -d
 pnpm install
 pnpm exec prisma migrate deploy
+pnpm db:seed
 pnpm start
 ```
 
