@@ -97,6 +97,27 @@ describe('Execucao', () => {
     expect(() => emStatus('EM_REPARO').cancelar()).toThrow('Status atual: EM_REPARO');
   });
 
+  it('sem agora explicito, usa o relogio atual em todas as transicoes', () => {
+    jest.useFakeTimers().setSystemTime(T1);
+    const execucao = Execucao.criar('os-1');
+    execucao.iniciarDiagnostico('mec-1');
+    execucao.liberarParaReparo();
+    execucao.iniciarReparo();
+    execucao.concluir();
+    const cancelada = Execucao.criar('os-2');
+    cancelada.cancelar();
+    jest.useRealTimers();
+
+    expect(execucao.toProps()).toMatchObject({
+      createdAt: T1,
+      diagnosticoIniciadoEm: T1,
+      reparoIniciadoEm: T1,
+      concluidaEm: T1,
+      updatedAt: T1,
+    });
+    expect(cancelada.toProps()).toMatchObject({ status: 'CANCELADA', updatedAt: T1 });
+  });
+
   it('toProps devolve copia, sem expor o estado interno', () => {
     const execucao = Execucao.criar('os-1', T0);
     execucao.toProps().status = 'CONCLUIDA';
