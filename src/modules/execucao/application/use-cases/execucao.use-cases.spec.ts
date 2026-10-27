@@ -35,8 +35,8 @@ describe('use cases de Execucao', () => {
       findById: jest.fn(),
       save: jest.fn(),
       listar: jest.fn(),
-    } as unknown as jest.Mocked<IExecucaoRepository>;
-    publisher = { publish: jest.fn() } as unknown as jest.Mocked<IExecucaoEventPublisher>;
+    };
+    publisher = { publish: jest.fn() };
   });
 
   afterEach(() => jest.useRealTimers());
@@ -163,9 +163,9 @@ describe('use cases de Execucao', () => {
     it('com status e responsavel repassa os dois', async () => {
       const lista = [emStatus('EM_REPARO', 'mec-1')];
       repo.listar.mockResolvedValue(lista);
-      await expect(useCase().execute({ status: 'EM_REPARO', responsavelId: 'mec-1' })).resolves.toBe(
-        lista
-      );
+      await expect(
+        useCase().execute({ status: 'EM_REPARO', responsavelId: 'mec-1' })
+      ).resolves.toBe(lista);
       expect(repo.listar).toHaveBeenCalledWith({ status: ['EM_REPARO'], responsavelId: 'mec-1' });
     });
   });
