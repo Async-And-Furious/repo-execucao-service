@@ -57,7 +57,8 @@ docker compose -f docker-compose.dependencies.yml up -d
 pnpm install
 pnpm exec prisma migrate deploy
 pnpm db:seed
-pnpm start
+NEW_RELIC_ENABLED=false NEW_RELIC_NO_CONFIG_FILE=true NEW_RELIC_LICENSE_KEY= \
+  NEW_RELIC_LOG=stdout pnpm start
 ```
 
 - Healthcheck: `/api/v1/health`, `/api/v1/health/live`, `/api/v1/health/ready`
