@@ -67,6 +67,60 @@ pnpm start
 
 Manifests em `k8s/`: namespace `execucao`, Deployment, Service, migration Job, configmap e secret. Namespace, ECR proprio e banco/role sao provisionados pelo Epic #312. Workflows de CI/CD e protecao de branch ficam para a Feature de Testes e Pipeline.
 
+## Observabilidade — onboarding parcial (#343)
+
+O agente `newrelic` 14.4.0 e carregado antes dos demais modulos, com configuracao
+exclusivamente por ambiente (sem `newrelic.js` ou SDK OpenTelemetry). A identidade
+HML deste servico e **`af-execucao-hml`**; o OS Service permanece
+`async-furious-project-hml` e o Billing usa `af-billing-hml`. Nao adotamos labels
+opcionais nem alteramos sampling neste incremento.
+
+Fornecer estas variaveis **antes de iniciar o processo**: o `ConfigModule` le
+`.env` depois do primeiro import e nao reconfigura o agente ja carregado.
+
+| Variavel | HML | Local sem telemetria |
+| --- | --- | --- |
+| `NEW_RELIC_ENABLED` | default `true` | `false` |
+| `NEW_RELIC_NO_CONFIG_FILE` | `true` | `true` |
+| `NEW_RELIC_APP_NAME` | `af-execucao-hml` | `af-execucao-local` |
+| `NEW_RELIC_LICENSE_KEY` | secret externo, nunca no ConfigMap | vazia |
+| `NEW_RELIC_DISTRIBUTED_TRACING_ENABLED` | `true` | `true` |
+| `NEW_RELIC_APPLICATION_LOGGING_ENABLED` | `true` | `true` |
+| `NEW_RELIC_APPLICATION_LOGGING_LOCAL_DECORATING_ENABLED` | `true` | `true` |
+| `NEW_RELIC_APPLICATION_LOGGING_FORWARDING_ENABLED` | `false` | `false` |
+| `NEW_RELIC_LOG` | `stdout` | `stdout` |
+
+O log do agente usa stdout para nao exigir escrita no container nao-root.
+Forwarding pelo agente fica desligado para nao duplicar o envio pelo Fluent Bit.
+O log tardio de "request completed" do pino-http pode nao carregar `trace.id`.
+O trace comeca no primeiro servico: **API Gateway → Lambda/Authorizer nao e
+coberto**. `trace.id` nao substitui o `correlationId=ordemServicoId` dos eventos.
+
+Exemplo de teste local isolado, com Node 22 e pnpm 10.18.3, sem key ou servicos externos:
+
+```bash
+NEW_RELIC_ENABLED=false NEW_RELIC_NO_CONFIG_FILE=true NEW_RELIC_LICENSE_KEY= \
+  pnpm exec jest --runInBand test/observability/newrelic-onboarding.spec.ts
+```
+
+Referencia documental do dashboard herdado: New Relic One →
+`tc3-observability-hml`, mantido em `repo-k8s-infra`; ver
+[ADR-0005](https://github.com/Async-And-Furious/async-furious-project/blob/develop/docs/adr/0005-observabilidade.md).
+Nao houve consulta atual a esse dashboard nem validacao HML neste incremento.
+
+**Entrega parcial de #343 — nao fecha a issue.** Ainda faltam onboarding do
+Billing (sem base `develop`), distribuicao autorizada da key por secret de
+organizacao (ou fallback aprovado com verificacao bloqueante antes do deploy),
+injecao no container pela esteira de #328 e confirmacao das tres entidades APM.
+O Deployment ja recebe `execucao-secret` por `envFrom`; este incremento nao
+altera secrets ou workflows e nao esta pronto para aceite HML sem essa integracao.
+Com #344/#337, validar um trace real OS → Kafka → Execucao por
+`OrdemServicoRecebida` assim que o segundo servico estiver disponivel, com
+evidencia na issue. Tambem falta registrar o resultado real dos segmentos
+MongoDB de `find`, `replaceOne` e `bulkWrite` no DocumentDB do **OS Service**,
+inclusive se negativo. Widgets/alertas ficam em #345/#346. Um futuro PR deve
+usar `Refs #343`, sem fechamento automatico.
+
 ## Pendencias conhecidas
 
 - OpenAPI exportado e versionado neste README (depende do deploy em HML).
