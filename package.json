@@ -36,6 +36,7 @@
     "class-validator": "^0.14.1",
     "helmet": "^8.1.0",
     "nestjs-pino": "^4.6.1",
+    "newrelic": "14.4.0",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "pino": "^10.3.1",
