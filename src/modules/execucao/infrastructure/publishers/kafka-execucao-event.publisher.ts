@@ -28,8 +28,7 @@ export class KafkaExecucaoEventPublisher implements IExecucaoEventPublisher, OnM
   }
 
   async publish(evento: EventoExecucao): Promise<void> {
-    this.connected ??= this.producer.connect();
-    await this.connected;
+    await this.connect();
     await this.producer.send({
       topic: 'execucao.eventos.v1',
       acks: -1,
@@ -54,6 +53,16 @@ export class KafkaExecucaoEventPublisher implements IExecucaoEventPublisher, OnM
     if (this.connected) {
       await this.connected;
       await this.producer.disconnect();
+    }
+  }
+
+  private async connect(): Promise<void> {
+    this.connected ??= this.producer.connect();
+    try {
+      await this.connected;
+    } catch (error) {
+      this.connected = undefined;
+      throw error;
     }
   }
 }

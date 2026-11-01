@@ -40,7 +40,7 @@ function isEnvelope(
     candidate.retry === undefined ||
     (!!retry &&
       Number.isInteger(retry.attempt) &&
-      Number(retry.attempt) >= 2 &&
+      Number(retry.attempt) >= 1 &&
       Number(retry.attempt) <= MAX_ATTEMPTS &&
       typeof retry.firstFailedAt === 'string' &&
       Number.isFinite(Date.parse(retry.firstFailedAt)) &&
@@ -177,8 +177,9 @@ export class KafkaSagaEventConsumer implements OnModuleInit, OnModuleDestroy {
               { eventId, correlationId, ordemServicoId: orderId, outcome },
               'Saga event handled'
             );
-            const attempt = parsed.retry?.attempt ?? 1;
-            const decision = retryDecision(outcome, attempt);
+            const attemptsCompleted = parsed.retry?.attempt ?? 0;
+            const deliveryNumber = attemptsCompleted + 1;
+            const decision = retryDecision(outcome, deliveryNumber);
             if (decision === 'done') return;
             if (decision === 'dlt') {
               await this.send(
@@ -191,7 +192,7 @@ export class KafkaSagaEventConsumer implements OnModuleInit, OnModuleDestroy {
                       ? 'Invalid event payload or Saga stage'
                       : lastError,
                   retry: {
-                    attempt,
+                    attempt: Math.min(deliveryNumber, MAX_ATTEMPTS),
                     firstFailedAt: parsed.retry?.firstFailedAt ?? new Date().toISOString(),
                     notBefore: parsed.retry?.notBefore ?? new Date().toISOString(),
                   },
@@ -199,14 +200,14 @@ export class KafkaSagaEventConsumer implements OnModuleInit, OnModuleDestroy {
               );
               return;
             }
-            const delayMs = 1000 * 2 ** (attempt - 1);
+            const delayMs = 1000 * 2 ** (deliveryNumber - 1);
             await this.send(
               RETRY_TOPIC,
               orderId ?? '',
               JSON.stringify({
                 ...parsed,
                 retry: {
-                  attempt: attempt + 1,
+                  attempt: deliveryNumber,
                   firstFailedAt: parsed.retry?.firstFailedAt ?? new Date().toISOString(),
                   notBefore: new Date(Date.now() + delayMs).toISOString(),
                 },

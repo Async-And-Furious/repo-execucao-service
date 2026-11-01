@@ -126,7 +126,7 @@ describe('KafkaSagaEventConsumer', () => {
     );
     expect(sent()[0]).toMatchObject({ topic: 'execucao.retry.v1', acks: -1 });
     expect(retry.retry).toMatchObject({
-      attempt: 2,
+      attempt: 1,
       firstFailedAt: expect.any(String),
       notBefore: expect.any(String),
     });
@@ -134,7 +134,7 @@ describe('KafkaSagaEventConsumer', () => {
       {
         ...envelope(),
         retry: {
-          attempt: 2,
+          attempt: 1,
           firstFailedAt: '2026-11-01T00:00:00Z',
           notBefore: '2020-01-01T00:00:00Z',
         },
@@ -152,7 +152,7 @@ describe('KafkaSagaEventConsumer', () => {
       {
         ...envelope(),
         retry: {
-          attempt: 3,
+          attempt: 2,
           firstFailedAt: '2026-11-01T00:00:00Z',
           notBefore: '2020-01-01T00:00:00Z',
         },

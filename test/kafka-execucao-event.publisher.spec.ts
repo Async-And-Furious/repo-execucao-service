@@ -59,6 +59,26 @@ describe('KafkaExecucaoEventPublisher', () => {
     });
   });
 
+  it('retries producer connection after an initial connection failure', async () => {
+    mockProducer.connect
+      .mockRejectedValueOnce(new Error('broker unavailable'))
+      .mockResolvedValueOnce(undefined);
+    const publisher = new KafkaExecucaoEventPublisher({
+      get: (key: string) => (({ KAFKA_BROKERS: 'kafka:9092' }) as Record<string, string>)[key],
+    } as never);
+    const event = new DiagnosticoIniciado({
+      execucaoId: 'ex-1',
+      ordemServicoId: 'os-1',
+      responsavelId: null,
+      diagnosticoIniciadoEm: '2026-11-01T00:00:00.000Z',
+    });
+
+    await expect(publisher.publish(event)).rejects.toThrow('broker unavailable');
+    await expect(publisher.publish(event)).resolves.toBeUndefined();
+    expect(mockProducer.connect).toHaveBeenCalledTimes(2);
+    expect(mockProducer.send).toHaveBeenCalledTimes(1);
+  });
+
   it('uses SASL only when both configured env values exist and rejects partial credentials', () => {
     new KafkaExecucaoEventPublisher({
       get: (key: string) =>
