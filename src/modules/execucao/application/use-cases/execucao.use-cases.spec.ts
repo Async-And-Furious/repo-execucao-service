@@ -33,9 +33,25 @@ describe('use cases de Execucao', () => {
     repo = {
       create: jest.fn(),
       findById: jest.fn(),
+      findByOrdemServicoId: jest.fn(),
       save: jest.fn(),
+      transition: jest.fn(),
       listar: jest.fn(),
     };
+    repo.transition.mockImplementation(async (id, from, to, at, fields) => {
+      const current = await repo.findById(id);
+      if (!current || !from.includes(current.toProps().status))
+        return { execucao: current, changed: false };
+      return {
+        execucao: Execucao.restaurar({
+          ...current.toProps(),
+          status: to,
+          updatedAt: at,
+          ...fields,
+        }),
+        changed: true,
+      };
+    });
     publisher = { publish: jest.fn() };
   });
 
@@ -55,7 +71,7 @@ describe('use cases de Execucao', () => {
         responsavelId: 'mec-1',
         diagnosticoIniciadoEm: AGORA,
       });
-      expect(repo.save).toHaveBeenCalledWith(execucao);
+      expect(repo.transition).toHaveBeenCalled();
       const evento = publisher.publish.mock.calls[0][0];
       expect(evento).toBeInstanceOf(DiagnosticoIniciado);
       expect(evento.correlationId).toBe('os-1');
@@ -70,14 +86,14 @@ describe('use cases de Execucao', () => {
     it('lanca EntityNotFoundException quando a execucao nao existe', async () => {
       repo.findById.mockResolvedValue(null);
       await expect(useCase().execute('x', 'mec-1')).rejects.toBeInstanceOf(EntityNotFoundException);
-      expect(repo.save).not.toHaveBeenCalled();
+      expect(repo.transition).not.toHaveBeenCalled();
       expect(publisher.publish).not.toHaveBeenCalled();
     });
 
     it('nao salva nem publica em transicao invalida', async () => {
       repo.findById.mockResolvedValue(emStatus('EM_DIAGNOSTICO', 'mec-1'));
       await expect(useCase().execute('id', 'mec-2')).rejects.toBeInstanceOf(DomainException);
-      expect(repo.save).not.toHaveBeenCalled();
+      expect(repo.transition).toHaveBeenCalled();
       expect(publisher.publish).not.toHaveBeenCalled();
     });
   });
@@ -92,7 +108,7 @@ describe('use cases de Execucao', () => {
       const resultado = await useCase().execute(execucao.toProps().id);
 
       expect(resultado.toProps()).toMatchObject({ status: 'EM_REPARO', reparoIniciadoEm: AGORA });
-      expect(repo.save).toHaveBeenCalledWith(execucao);
+      expect(repo.transition).toHaveBeenCalled();
       const evento = publisher.publish.mock.calls[0][0];
       expect(evento).toBeInstanceOf(ExecucaoIniciada);
       expect(evento.data).toEqual({
@@ -125,7 +141,7 @@ describe('use cases de Execucao', () => {
       const resultado = await useCase().execute(execucao.toProps().id);
 
       expect(resultado.toProps()).toMatchObject({ status: 'CONCLUIDA', concluidaEm: AGORA });
-      expect(repo.save).toHaveBeenCalledWith(execucao);
+      expect(repo.transition).toHaveBeenCalled();
       const evento = publisher.publish.mock.calls[0][0];
       expect(evento).toBeInstanceOf(ExecucaoConcluida);
       expect(evento.data).toEqual({

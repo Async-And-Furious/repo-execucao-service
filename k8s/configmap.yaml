@@ -11,4 +11,4 @@ data:
   JWT_AUDIENCE: async-furious-project
   JWT_EXPIRES_IN: '1800'
   KAFKA_BROKERS: ${kafka_brokers}
-  KAFKA_CONSUMER_GROUP: execucao-service
+  KAFKA_CONSUMER_GROUP: execucao-consumer

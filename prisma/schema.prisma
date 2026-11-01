@@ -1,5 +1,4 @@
 // Schema do servico de Execucao e Producao.
-// Nenhum model herdado do monolito. ProcessedEvent guarda a idempotencia dos eventos Kafka por eventId.
 // Execucao referencia a OS so por id (ordemServicoId), sem FK e sem replica de dados da OS.
 generator client {
   provider      = "prisma-client-js"
@@ -11,6 +10,7 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Legacy table retained by the initial migration; unused by the Saga feature.
 model ProcessedEvent {
   eventId     String   @id @map("event_id")
   processedAt DateTime @default(now()) @map("processed_at")

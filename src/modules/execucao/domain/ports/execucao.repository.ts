@@ -8,8 +8,21 @@ export interface FiltroFilaExecucao {
 }
 
 export interface IExecucaoRepository {
-  create(execucao: Execucao): Promise<void>;
+  create(execucao: Execucao): Promise<boolean>;
   findById(id: string): Promise<Execucao | null>;
+  findByOrdemServicoId(id: string): Promise<Execucao | null>;
   save(execucao: Execucao): Promise<void>;
+  transition(
+    id: string,
+    from: ExecucaoStatus[],
+    to: ExecucaoStatus,
+    at: Date,
+    fields?: {
+      responsavelId?: string;
+      diagnosticoIniciadoEm?: Date;
+      reparoIniciadoEm?: Date;
+      concluidaEm?: Date;
+    }
+  ): Promise<{ execucao: Execucao | null; changed: boolean }>;
   listar(filtro: FiltroFilaExecucao): Promise<Execucao[]>;
 }

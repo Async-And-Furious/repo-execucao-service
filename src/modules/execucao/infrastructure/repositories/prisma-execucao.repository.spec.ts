@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../../shared/infrastructure/database/prisma.service';
 import { Execucao } from '../../domain/entities/execucao.entity';
 import { PrismaExecucaoRepository } from './prisma-execucao.repository';
@@ -16,11 +17,27 @@ describe('PrismaExecucaoRepository', () => {
   const repository = new PrismaExecucaoRepository(prisma as unknown as PrismaService);
   const execucao = Execucao.criar('os-1', T0);
 
-  beforeEach(() => jest.clearAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prisma.execucao.create.mockResolvedValue(undefined);
+  });
 
   it('create grava todas as props do agregado', async () => {
-    await repository.create(execucao);
+    await expect(repository.create(execucao)).resolves.toBe(true);
     expect(prisma.execucao.create).toHaveBeenCalledWith({ data: execucao.toProps() });
+  });
+
+  it('create treats only the orderId unique constraint as a duplicate', async () => {
+    prisma.execucao.create.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError('Unique constraint', {
+        code: 'P2002',
+        clientVersion: '5.22.0',
+        meta: { target: ['ordemServicoId'] },
+      })
+    );
+    await expect(repository.create(execucao)).resolves.toBe(false);
+    prisma.execucao.create.mockRejectedValueOnce(new Error('database unavailable'));
+    await expect(repository.create(execucao)).rejects.toThrow('database unavailable');
   });
 
   it('findById devolve null quando nao encontra', async () => {

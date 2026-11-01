@@ -1,4 +1,5 @@
 import { EntityNotFoundException } from '../../../../shared/domain/exceptions/entity-not-found.exception';
+import { DomainException } from '../../../../shared/domain/exceptions/domain.exception';
 import { Execucao, ExecucaoStatus } from '../../domain/entities/execucao.entity';
 import {
   DiagnosticoIniciado,
@@ -39,8 +40,18 @@ export class IniciarDiagnosticoUseCase {
   async execute(id: string, responsavelId: string): Promise<Execucao> {
     const execucao = await buscarExecucao(this.repo, id);
     const agora = new Date();
+    const result = await this.repo.transition(
+      id,
+      [ExecucaoStatus.AGUARDANDO_DIAGNOSTICO],
+      ExecucaoStatus.EM_DIAGNOSTICO,
+      agora,
+      { responsavelId, diagnosticoIniciadoEm: agora }
+    );
+    if (!result.changed)
+      throw new DomainException(
+        `Execução não está aguardando diagnóstico: ${result.execucao?.toProps().status ?? 'inexistente'}`
+      );
     execucao.iniciarDiagnostico(responsavelId, agora);
-    await this.repo.save(execucao);
     await this.publisher.publish(
       new DiagnosticoIniciado({ ...marco(execucao), diagnosticoIniciadoEm: agora.toISOString() })
     );
@@ -58,8 +69,18 @@ export class IniciarReparoUseCase {
   async execute(id: string): Promise<Execucao> {
     const execucao = await buscarExecucao(this.repo, id);
     const agora = new Date();
+    const result = await this.repo.transition(
+      id,
+      [ExecucaoStatus.AGUARDANDO_REPARO],
+      ExecucaoStatus.EM_REPARO,
+      agora,
+      { reparoIniciadoEm: agora }
+    );
+    if (!result.changed)
+      throw new DomainException(
+        `Execução não está aguardando reparo: ${result.execucao?.toProps().status ?? 'inexistente'}`
+      );
     execucao.iniciarReparo(agora);
-    await this.repo.save(execucao);
     await this.publisher.publish(
       new ExecucaoIniciada({ ...marco(execucao), reparoIniciadoEm: agora.toISOString() })
     );
@@ -77,8 +98,18 @@ export class ConcluirExecucaoUseCase {
   async execute(id: string): Promise<Execucao> {
     const execucao = await buscarExecucao(this.repo, id);
     const agora = new Date();
+    const result = await this.repo.transition(
+      id,
+      [ExecucaoStatus.EM_REPARO],
+      ExecucaoStatus.CONCLUIDA,
+      agora,
+      { concluidaEm: agora }
+    );
+    if (!result.changed)
+      throw new DomainException(
+        `Execução não está em reparo: ${result.execucao?.toProps().status ?? 'inexistente'}`
+      );
     execucao.concluir(agora);
-    await this.repo.save(execucao);
     await this.publisher.publish(
       new ExecucaoConcluida({ ...marco(execucao), concluidaEm: agora.toISOString() })
     );
