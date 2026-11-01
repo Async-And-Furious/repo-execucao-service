@@ -105,12 +105,16 @@ describe('KafkaSagaEventConsumer', () => {
     expect(mockConsumer.run.mock.calls[0][0]).toMatchObject({ partitionsConsumedConcurrently: 4 });
   });
 
-  it('processes success, ignores null values, and emits no messages', async () => {
+  it('routes tombstones to DLT and processes valid events', async () => {
     await start();
     await deliver(null);
     await deliver(envelope());
     expect(mockHandle).toHaveBeenCalledTimes(1);
-    expect(sent()).toHaveLength(0);
+    expect(sent()).toHaveLength(1);
+    expect(sent()[0]).toMatchObject({ topic: 'execucao.dlt.v1' });
+    expect(
+      JSON.parse(String((sent()[0].messages as Array<{ value: string }>)[0].value))
+    ).toMatchObject({ eventType: 'InvalidEnvelope', lastError: 'Kafka message has no value' });
   });
 
   it('sends retry metadata and handles retry backlog', async () => {
@@ -177,7 +181,8 @@ describe('KafkaSagaEventConsumer', () => {
     const dlt = JSON.parse(String((sent()[0].messages as Array<{ value: string }>)[0].value));
     expect(dlt).toMatchObject({
       eventType: 'InvalidEnvelope',
-      data: { summary: 'Malformed Kafka envelope' },
+      data: { summary: 'Invalid Kafka event envelope' },
+      lastError: 'Invalid Kafka event envelope',
     });
     expect(JSON.stringify(dlt)).not.toContain('secret raw payload');
   });

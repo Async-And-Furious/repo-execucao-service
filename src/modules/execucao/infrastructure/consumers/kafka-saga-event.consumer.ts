@@ -113,7 +113,14 @@ export class KafkaSagaEventConsumer implements OnModuleInit, OnModuleDestroy {
     await this.consumer.run({
       partitionsConsumedConcurrently: 4,
       eachMessage: async ({ topic, partition, message }) => {
-        if (!message.value) return;
+        if (!message.value) {
+          await this.sendInvalidEnvelope(
+            topic,
+            message.key?.toString(),
+            'Kafka message has no value'
+          );
+          return;
+        }
         let parsed: SagaEnvelope & {
           retry?: { attempt: number; firstFailedAt: string; notBefore: string };
         };
@@ -123,39 +130,11 @@ export class KafkaSagaEventConsumer implements OnModuleInit, OnModuleDestroy {
             throw new Error('Invalid Kafka event envelope');
           parsed = candidate;
         } catch {
-          const invalidEventId = randomUUID();
           const invalidKey = message.key?.toString() ?? null;
-          this.pino.error(
-            {
-              eventId: invalidEventId,
-              correlationId: invalidKey ?? invalidEventId,
-              ordemServicoId: invalidKey,
-              topic,
-            },
-            'Invalid Saga event envelope'
-          );
-          await this.send(
-            DLT_TOPIC,
+          await this.sendInvalidEnvelope(
+            topic,
             invalidKey ?? undefined,
-            JSON.stringify({
-              eventId: invalidEventId,
-              eventType: 'InvalidEnvelope',
-              eventVersion: 1,
-              occurredAt: new Date().toISOString(),
-              producer: 'execucao-producao-service',
-              correlationId: invalidKey ?? invalidEventId,
-              data: {
-                sourceTopic: topic,
-                ordemServicoId: invalidKey,
-                summary: 'Malformed Kafka envelope',
-              },
-              retry: {
-                attempt: 1,
-                firstFailedAt: new Date().toISOString(),
-                notBefore: new Date().toISOString(),
-              },
-              lastError: 'Invalid Kafka event envelope',
-            })
+            'Invalid Kafka event envelope'
           );
           return;
         }
@@ -250,5 +229,34 @@ export class KafkaSagaEventConsumer implements OnModuleInit, OnModuleDestroy {
 
   private async send(topic: string, key: string | undefined, value: string): Promise<void> {
     await this.producer.send({ topic, acks: -1, messages: [{ key, value }] });
+  }
+
+  private async sendInvalidEnvelope(
+    sourceTopic: string,
+    key: string | undefined,
+    reason: string
+  ): Promise<void> {
+    const eventId = randomUUID();
+    const now = new Date().toISOString();
+    const correlationId = key ?? eventId;
+    this.pino.error(
+      { eventId, correlationId, ordemServicoId: key, sourceTopic },
+      'Invalid Saga event envelope'
+    );
+    await this.send(
+      DLT_TOPIC,
+      key,
+      JSON.stringify({
+        eventId,
+        eventType: 'InvalidEnvelope',
+        eventVersion: 1,
+        occurredAt: now,
+        producer: 'execucao-producao-service',
+        correlationId,
+        data: { sourceTopic, ordemServicoId: key ?? null, summary: reason },
+        retry: { attempt: 1, firstFailedAt: now, notBefore: now },
+        lastError: reason,
+      })
+    );
   }
 }
