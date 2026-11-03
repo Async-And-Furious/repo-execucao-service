@@ -68,6 +68,10 @@ NEW_RELIC_ENABLED=false NEW_RELIC_NO_CONFIG_FILE=true NEW_RELIC_LICENSE_KEY= \
 
 Manifests em `k8s/`: namespace `execucao`, Deployment, Service, migration Job, configmap e secret. Namespace, ECR proprio e banco/role sao provisionados pelo Epic #312. Workflows de CI/CD e protecao de branch ficam para a Feature de Testes e Pipeline.
 
+## Recuperacao de publicacao da Saga
+
+As transicoes sao persistidas com compare-and-swap antes da publicacao Kafka. Se o publish falhar depois do commit, o publisher registra `ordemServicoId`, `eventType` e `correlationId` e propaga o erro. Reprocessar Kafka nao recupera uma mensagem que nunca chegou ao broker. Este servico nao possui endpoint webhook de recuperacao; reconciliacao e manual entre OS e Execucao, ate existir procedimento aprovado. Este PR nao alega replay automatico.
+
 ## Observabilidade — onboarding parcial (#343)
 
 O agente `newrelic` 14.4.0 e carregado antes dos demais modulos, com configuracao

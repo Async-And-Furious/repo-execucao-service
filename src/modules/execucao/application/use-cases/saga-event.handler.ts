@@ -35,13 +35,16 @@ export class SagaEventHandler {
     if (event.eventType === 'PagamentoConfirmado') {
       if (status === ExecucaoStatus.AGUARDANDO_DIAGNOSTICO) return 'retryable';
       if (status !== ExecucaoStatus.EM_DIAGNOSTICO) return 'ignore';
-      const updated = await this.repo.transition(
-        current.toProps().id,
-        [ExecucaoStatus.EM_DIAGNOSTICO],
-        ExecucaoStatus.AGUARDANDO_REPARO,
-        new Date()
-      );
-      return updated.changed ? 'processed' : 'ignore';
+      current.liberarParaReparo(new Date());
+      if (await this.repo.save(current, status)) return 'processed';
+      const latest = await this.repo.findByOrdemServicoId(orderId);
+      if (!latest) return 'retryable';
+      return new Set<ExecucaoStatus>([
+        ExecucaoStatus.AGUARDANDO_DIAGNOSTICO,
+        ExecucaoStatus.EM_DIAGNOSTICO,
+      ]).has(latest.toProps().status)
+        ? 'retryable'
+        : 'ignore';
     }
 
     if (!['OrcamentoRecusado', 'PagamentoRecusado', 'EtapaDaSagaFalhou'].includes(event.eventType))
@@ -56,12 +59,12 @@ export class SagaEventHandler {
       if (event.data.etapa === 'reparo') return 'ignore';
     }
     if (!(CANCELLABLE as ExecucaoStatus[]).includes(status)) return 'ignore';
-    const updated = await this.repo.transition(
-      current.toProps().id,
-      CANCELLABLE,
-      ExecucaoStatus.CANCELADA,
-      new Date()
-    );
-    return updated.changed ? 'processed' : 'ignore';
+    current.cancelar(new Date());
+    if (await this.repo.save(current, status)) return 'processed';
+    const latest = await this.repo.findByOrdemServicoId(orderId);
+    if (!latest) return 'ignore';
+    return (CANCELLABLE as ExecucaoStatus[]).includes(latest.toProps().status)
+      ? 'retryable'
+      : 'ignore';
   }
 }

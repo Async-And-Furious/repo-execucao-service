@@ -40,6 +40,7 @@ type EachMessage = (payload: {
   topic: string;
   partition: number;
   message: { key: Buffer | null; value: Buffer | null };
+  heartbeat: () => Promise<void>;
 }) => Promise<void>;
 const orderId = 'order-123';
 const envelope = (eventType = 'PagamentoConfirmado') => ({
@@ -90,6 +91,7 @@ describe('KafkaSagaEventConsumer', () => {
             ? null
             : Buffer.from(typeof value === 'string' ? value : JSON.stringify(value)),
       },
+      heartbeat: jest.fn().mockResolvedValue(undefined),
     });
   }
   const sent = () => mockProducer.send.mock.calls.map(([request]) => request);
@@ -99,7 +101,7 @@ describe('KafkaSagaEventConsumer', () => {
     expect(mockConsumer.connect).toHaveBeenCalledTimes(1);
     expect(mockProducer.connect).toHaveBeenCalledTimes(1);
     expect(mockConsumer.subscribe.mock.calls).toEqual([
-      [{ topics: ['os.eventos.v1', 'billing.eventos.v1'] }],
+      [{ topics: ['os.eventos.v1', 'billing.eventos.v1'], fromBeginning: true }],
       [{ topic: 'execucao.retry.v1', fromBeginning: true }],
     ]);
     expect(mockConsumer.run.mock.calls[0][0]).toMatchObject({ partitionsConsumedConcurrently: 4 });
@@ -130,6 +132,8 @@ describe('KafkaSagaEventConsumer', () => {
       firstFailedAt: expect.any(String),
       notBefore: expect.any(String),
     });
+    expect(Date.parse(retry.retry.notBefore) - Date.now()).toBeGreaterThanOrEqual(29_990);
+    expect(Date.parse(retry.retry.notBefore) - Date.now()).toBeLessThanOrEqual(30_000);
     await deliver(
       {
         ...envelope(),
@@ -163,6 +167,33 @@ describe('KafkaSagaEventConsumer', () => {
     expect(
       JSON.parse(String((sent()[0].messages as Array<{ value: string }>)[0].value))
     ).toMatchObject({ lastError: 'database unavailable', retry: { attempt: 3 } });
+  });
+
+  it('propagates the original envelope and schedules the second retry after 60 seconds', async () => {
+    mockHandle.mockResolvedValue('retryable');
+    await start();
+    await deliver(envelope());
+    const firstRetry = JSON.parse(
+      String((sent()[0].messages as Array<{ value: string }>)[0].value)
+    );
+    await deliver(
+      {
+        ...firstRetry,
+        retry: { ...firstRetry.retry, notBefore: '2020-01-01T00:00:00Z' },
+      },
+      'execucao.retry.v1'
+    );
+    const secondRetry = JSON.parse(
+      String((sent()[1].messages as Array<{ value: string }>)[0].value)
+    );
+    expect(secondRetry).toMatchObject({
+      eventId: 'event-1',
+      eventType: 'PagamentoConfirmado',
+      data: { ordemServicoId: orderId },
+      retry: { attempt: 2 },
+    });
+    expect(Date.parse(secondRetry.retry.notBefore) - Date.now()).toBeGreaterThanOrEqual(59_990);
+    expect(Date.parse(secondRetry.retry.notBefore) - Date.now()).toBeLessThanOrEqual(60_000);
   });
 
   it('sends business errors immediately to DLT', async () => {
@@ -209,11 +240,69 @@ describe('KafkaSagaEventConsumer', () => {
     expect(mockConsumer.pause).toHaveBeenCalledWith([
       { topic: 'execucao.retry.v1', partitions: [2] },
     ]);
-    jest.advanceTimersByTime(5000);
+    await jest.advanceTimersByTimeAsync(5000);
     await delivery;
+    expect(mockConsumer.pause).toHaveBeenCalledTimes(1);
+    expect(mockConsumer.resume).toHaveBeenCalledTimes(1);
     expect(mockConsumer.resume).toHaveBeenCalledWith([
       { topic: 'execucao.retry.v1', partitions: [2] },
     ]);
+    jest.useRealTimers();
+  });
+
+  it('heartbeats during retry wait', async () => {
+    jest.useFakeTimers();
+    const notBefore = new Date(Date.now() + 10_000).toISOString();
+    await start();
+    const heartbeat = jest.fn().mockResolvedValue(undefined);
+    const delivery = eachMessage({
+      topic: 'execucao.retry.v1',
+      partition: 2,
+      message: {
+        key: Buffer.from(orderId),
+        value: Buffer.from(
+          JSON.stringify({
+            ...envelope(),
+            retry: { attempt: 2, firstFailedAt: notBefore, notBefore },
+          })
+        ),
+      },
+      heartbeat,
+    });
+    await jest.advanceTimersByTimeAsync(10_000);
+    await delivery;
+    expect(heartbeat).toHaveBeenCalledTimes(2);
+    expect(mockConsumer.resume).toHaveBeenCalledWith([
+      { topic: 'execucao.retry.v1', partitions: [2] },
+    ]);
+    jest.useRealTimers();
+  });
+
+  it('leaves a failed retry delivery unacknowledged when heartbeat fails', async () => {
+    jest.useFakeTimers();
+    const notBefore = new Date(Date.now() + 5000).toISOString();
+    await start();
+    const delivery = eachMessage({
+      topic: 'execucao.retry.v1',
+      partition: 2,
+      message: {
+        key: Buffer.from(orderId),
+        value: Buffer.from(
+          JSON.stringify({
+            ...envelope(),
+            retry: { attempt: 2, firstFailedAt: notBefore, notBefore },
+          })
+        ),
+      },
+      heartbeat: jest.fn().mockRejectedValue(new Error('session lost')),
+    });
+    const rejected = expect(delivery).rejects.toThrow('session lost');
+    await jest.advanceTimersByTimeAsync(5000);
+    await rejected;
+    expect(mockConsumer.resume).toHaveBeenCalledWith([
+      { topic: 'execucao.retry.v1', partitions: [2] },
+    ]);
+    expect(mockHandle).not.toHaveBeenCalled();
     jest.useRealTimers();
   });
 

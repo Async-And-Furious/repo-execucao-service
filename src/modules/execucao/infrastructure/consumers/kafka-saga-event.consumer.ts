@@ -11,6 +11,17 @@ import { runWithLogContext } from '../../../../shared/infrastructure/logging/pin
 const RETRY_TOPIC = 'execucao.retry.v1';
 const DLT_TOPIC = 'execucao.dlt.v1';
 const MAX_ATTEMPTS = 3;
+const RETRY_DELAYS_MS = [30_000, 60_000];
+
+export async function waitForRetry(delayMs: number, heartbeat: () => Promise<void>): Promise<void> {
+  let remaining = delayMs;
+  while (remaining > 0) {
+    const interval = Math.min(remaining, 5_000);
+    await new Promise<void>((resolve) => setTimeout(resolve, interval));
+    remaining -= interval;
+    await heartbeat();
+  }
+}
 
 export function retryDecision(outcome: string, attempts: number): 'retry' | 'dlt' | 'done' {
   if (outcome === 'processed' || outcome === 'ignore') return 'done';
@@ -108,11 +119,15 @@ export class KafkaSagaEventConsumer implements OnModuleInit, OnModuleDestroy {
     await Promise.all([this.consumer.connect(), this.producer.connect()]);
     this.consumerConnected = true;
     this.producerConnected = true;
-    await this.consumer.subscribe({ topics: ['os.eventos.v1', 'billing.eventos.v1'] });
+    await this.consumer.subscribe({
+      topics: ['os.eventos.v1', 'billing.eventos.v1'],
+      fromBeginning: true,
+    });
     await this.consumer.subscribe({ topic: RETRY_TOPIC, fromBeginning: true });
     await this.consumer.run({
       partitionsConsumedConcurrently: 4,
-      eachMessage: async ({ topic, partition, message }) => {
+      eachMessage: async (payload) => {
+        const { topic, partition, message } = payload;
         if (!message.value) {
           await this.sendInvalidEnvelope(
             topic,
@@ -157,8 +172,11 @@ export class KafkaSagaEventConsumer implements OnModuleInit, OnModuleDestroy {
               const waitMs = Date.parse(parsed.retry.notBefore) - Date.now();
               if (waitMs > 0) {
                 this.consumer.pause([{ topic, partitions: [partition] }]);
-                await new Promise<void>((resolve) => setTimeout(resolve, waitMs));
-                this.consumer.resume([{ topic, partitions: [partition] }]);
+                try {
+                  await waitForRetry(waitMs, () => payload.heartbeat());
+                } finally {
+                  this.consumer.resume([{ topic, partitions: [partition] }]);
+                }
               }
             }
             let outcome: import('../../application/use-cases/saga-event.handler').EventOutcome;
@@ -200,7 +218,7 @@ export class KafkaSagaEventConsumer implements OnModuleInit, OnModuleDestroy {
               );
               return;
             }
-            const delayMs = 1000 * 2 ** (deliveryNumber - 1);
+            const delayMs = RETRY_DELAYS_MS[deliveryNumber - 1];
             await this.send(
               RETRY_TOPIC,
               orderId ?? '',

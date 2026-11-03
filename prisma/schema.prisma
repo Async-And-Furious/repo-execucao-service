@@ -10,14 +10,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Legacy table retained by the initial migration; unused by the Saga feature.
-model ProcessedEvent {
-  eventId     String   @id @map("event_id")
-  processedAt DateTime @default(now()) @map("processed_at")
-
-  @@map("processed_events")
-}
-
 enum ExecucaoStatus {
   AGUARDANDO_DIAGNOSTICO
   EM_DIAGNOSTICO

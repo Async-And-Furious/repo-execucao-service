@@ -34,18 +34,14 @@ describe('SagaEventHandler', () => {
         return Promise.resolve(true);
       }),
       findById: jest.fn(),
-      findByOrdemServicoId: jest.fn((_id: string) => Promise.resolve(execution)),
-      save: jest.fn(),
-      transition: jest.fn((_id, from, to, at, fields) => {
-        if (!execution || !from.includes(execution.toProps().status))
-          return Promise.resolve({ execucao: execution, changed: false });
-        execution = Execucao.restaurar({
-          ...execution.toProps(),
-          status: to,
-          updatedAt: at,
-          ...fields,
-        });
-        return Promise.resolve({ execucao: execution, changed: true });
+      findByOrdemServicoId: jest.fn((_id: string) =>
+        Promise.resolve(execution ? Execucao.restaurar(execution.toProps()) : null)
+      ),
+      save: jest.fn((candidate, expectedStatus) => {
+        if (!execution || execution.toProps().status !== expectedStatus)
+          return Promise.resolve(false);
+        execution = Execucao.restaurar(candidate.toProps());
+        return Promise.resolve(true);
       }),
       listar: jest.fn(),
     };
@@ -79,6 +75,20 @@ describe('SagaEventHandler', () => {
       expect(await handler.handle(envelope('PagamentoConfirmado'))).toBe('ignore');
     }
   });
+
+  it.each(['OrcamentoRecusado', 'PagamentoRecusado', 'EtapaDaSagaFalhou'])(
+    'ignores %s when the execution does not exist',
+    async (eventType) => {
+      expect(
+        await handler.handle(
+          eventType === 'EtapaDaSagaFalhou'
+            ? envelope(eventType, undefined, { etapa: 'inicio-execucao' })
+            : envelope(eventType)
+        )
+      ).toBe('ignore');
+      expect(repo.save).not.toHaveBeenCalled();
+    }
+  );
 
   it.each(['OrcamentoRecusado', 'PagamentoRecusado', 'EtapaDaSagaFalhou'])(
     'cancels %s only in allowed states',
@@ -129,42 +139,37 @@ describe('SagaEventHandler', () => {
     ).toBe('business-error');
   });
 
+  it('re-reads after losing compare-and-swap and retries only while the event can still apply', async () => {
+    execution = Execucao.restaurar({
+      ...Execucao.criar('os-1').toProps(),
+      status: ExecucaoStatus.EM_DIAGNOSTICO,
+    });
+    repo.save.mockResolvedValueOnce(false);
+    expect(await handler.handle(envelope('PagamentoConfirmado'))).toBe('retryable');
+
+    execution = Execucao.restaurar({ ...execution.toProps(), status: ExecucaoStatus.CANCELADA });
+    repo.save.mockResolvedValueOnce(false);
+    expect(await handler.handle(envelope('PagamentoConfirmado'))).toBe('ignore');
+  });
+
   it('conditional transitions resolve payment/cancel/repair races without overwriting EM_REPARO', async () => {
     execution = Execucao.restaurar({
       ...Execucao.criar('os-1').toProps(),
       status: ExecucaoStatus.AGUARDANDO_REPARO,
     });
-    const repair = repo.transition(
-      'id',
-      [ExecucaoStatus.AGUARDANDO_REPARO],
-      ExecucaoStatus.EM_REPARO,
-      new Date()
-    );
-    const cancel = repo.transition(
-      'id',
-      [
-        ExecucaoStatus.AGUARDANDO_DIAGNOSTICO,
-        ExecucaoStatus.EM_DIAGNOSTICO,
-        ExecucaoStatus.AGUARDANDO_REPARO,
-      ],
-      ExecucaoStatus.CANCELADA,
-      new Date()
-    );
+    const current = execution;
+    const repairAggregate = Execucao.restaurar(current.toProps());
+    repairAggregate.iniciarReparo();
+    const cancelAggregate = Execucao.restaurar(current.toProps());
+    cancelAggregate.cancelar();
+    const repair = repo.save(repairAggregate, ExecucaoStatus.AGUARDANDO_REPARO);
+    const cancel = repo.save(cancelAggregate, ExecucaoStatus.AGUARDANDO_REPARO);
     await Promise.all([repair, cancel]);
     expect([ExecucaoStatus.EM_REPARO, ExecucaoStatus.CANCELADA]).toContain(
       execution.toProps().status
     );
     if (execution.toProps().status === ExecucaoStatus.EM_REPARO) {
-      expect(
-        (
-          await repo.transition(
-            'id',
-            [ExecucaoStatus.AGUARDANDO_REPARO],
-            ExecucaoStatus.CANCELADA,
-            new Date()
-          )
-        ).changed
-      ).toBe(false);
+      expect(await repo.save(cancelAggregate, ExecucaoStatus.AGUARDANDO_REPARO)).toBe(false);
     }
   });
 });

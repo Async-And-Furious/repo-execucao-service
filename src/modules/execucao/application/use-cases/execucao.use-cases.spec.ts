@@ -34,24 +34,9 @@ describe('use cases de Execucao', () => {
       create: jest.fn(),
       findById: jest.fn(),
       findByOrdemServicoId: jest.fn(),
-      save: jest.fn(),
-      transition: jest.fn(),
+      save: jest.fn().mockResolvedValue(true),
       listar: jest.fn(),
     };
-    repo.transition.mockImplementation(async (id, from, to, at, fields) => {
-      const current = await repo.findById(id);
-      if (!current || !from.includes(current.toProps().status))
-        return { execucao: current, changed: false };
-      return {
-        execucao: Execucao.restaurar({
-          ...current.toProps(),
-          status: to,
-          updatedAt: at,
-          ...fields,
-        }),
-        changed: true,
-      };
-    });
     publisher = { publish: jest.fn() };
   });
 
@@ -71,7 +56,10 @@ describe('use cases de Execucao', () => {
         responsavelId: 'mec-1',
         diagnosticoIniciadoEm: AGORA,
       });
-      expect(repo.transition).toHaveBeenCalled();
+      expect(repo.save).toHaveBeenCalledWith(
+        expect.any(Execucao),
+        ExecucaoStatus.AGUARDANDO_DIAGNOSTICO
+      );
       const evento = publisher.publish.mock.calls[0][0];
       expect(evento).toBeInstanceOf(DiagnosticoIniciado);
       expect(evento.correlationId).toBe('os-1');
@@ -86,14 +74,14 @@ describe('use cases de Execucao', () => {
     it('lanca EntityNotFoundException quando a execucao nao existe', async () => {
       repo.findById.mockResolvedValue(null);
       await expect(useCase().execute('x', 'mec-1')).rejects.toBeInstanceOf(EntityNotFoundException);
-      expect(repo.transition).not.toHaveBeenCalled();
+      expect(repo.save).not.toHaveBeenCalled();
       expect(publisher.publish).not.toHaveBeenCalled();
     });
 
     it('nao salva nem publica em transicao invalida', async () => {
       repo.findById.mockResolvedValue(emStatus('EM_DIAGNOSTICO', 'mec-1'));
       await expect(useCase().execute('id', 'mec-2')).rejects.toBeInstanceOf(DomainException);
-      expect(repo.transition).toHaveBeenCalled();
+      expect(repo.save).not.toHaveBeenCalled();
       expect(publisher.publish).not.toHaveBeenCalled();
     });
   });
@@ -108,7 +96,10 @@ describe('use cases de Execucao', () => {
       const resultado = await useCase().execute(execucao.toProps().id);
 
       expect(resultado.toProps()).toMatchObject({ status: 'EM_REPARO', reparoIniciadoEm: AGORA });
-      expect(repo.transition).toHaveBeenCalled();
+      expect(repo.save).toHaveBeenCalledWith(
+        expect.any(Execucao),
+        ExecucaoStatus.AGUARDANDO_REPARO
+      );
       const evento = publisher.publish.mock.calls[0][0];
       expect(evento).toBeInstanceOf(ExecucaoIniciada);
       expect(evento.data).toEqual({
@@ -122,6 +113,17 @@ describe('use cases de Execucao', () => {
     it('so aceita AGUARDANDO_REPARO', async () => {
       repo.findById.mockResolvedValue(emStatus('EM_DIAGNOSTICO', 'mec-1'));
       await expect(useCase().execute('id')).rejects.toBeInstanceOf(DomainException);
+      expect(publisher.publish).not.toHaveBeenCalled();
+    });
+
+    it('does not publish from a stale entity when the database compare-and-swap loses', async () => {
+      const stale = emStatus(ExecucaoStatus.AGUARDANDO_REPARO, 'mec-1');
+      repo.findById.mockResolvedValue(stale);
+      repo.save.mockResolvedValue(false); // concurrent PagamentoConfirmado already changed DB state
+
+      await expect(useCase().execute(stale.toProps().id)).rejects.toBeInstanceOf(DomainException);
+      expect(stale.toProps().status).toBe(ExecucaoStatus.EM_REPARO);
+      expect(repo.save).toHaveBeenCalledWith(stale, ExecucaoStatus.AGUARDANDO_REPARO);
       expect(publisher.publish).not.toHaveBeenCalled();
     });
 
@@ -141,7 +143,7 @@ describe('use cases de Execucao', () => {
       const resultado = await useCase().execute(execucao.toProps().id);
 
       expect(resultado.toProps()).toMatchObject({ status: 'CONCLUIDA', concluidaEm: AGORA });
-      expect(repo.transition).toHaveBeenCalled();
+      expect(repo.save).toHaveBeenCalledWith(expect.any(Execucao), ExecucaoStatus.EM_REPARO);
       const evento = publisher.publish.mock.calls[0][0];
       expect(evento).toBeInstanceOf(ExecucaoConcluida);
       expect(evento.data).toEqual({

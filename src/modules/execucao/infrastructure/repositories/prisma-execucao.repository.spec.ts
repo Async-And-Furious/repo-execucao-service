@@ -10,7 +10,7 @@ describe('PrismaExecucaoRepository', () => {
     execucao: {
       create: jest.fn(),
       findUnique: jest.fn(),
-      update: jest.fn(),
+      updateMany: jest.fn(),
       findMany: jest.fn(),
     },
   };
@@ -52,10 +52,16 @@ describe('PrismaExecucaoRepository', () => {
     expect(encontrada?.toProps()).toEqual(execucao.toProps());
   });
 
-  it('save atualiza pelo id sem regravar o id', async () => {
-    const { id, ...data } = execucao.toProps();
-    await repository.save(execucao);
-    expect(prisma.execucao.update).toHaveBeenCalledWith({ where: { id }, data });
+  it('save updates only when the persisted status still matches the aggregate version', async () => {
+    const local = Execucao.restaurar(execucao.toProps());
+    local.iniciarDiagnostico('mec-1', T0);
+    prisma.execucao.updateMany.mockResolvedValue({ count: 1 });
+    await expect(repository.save(local, 'AGUARDANDO_DIAGNOSTICO')).resolves.toBe(true);
+    expect(prisma.execucao.updateMany).toHaveBeenCalledWith({
+      where: { id: local.toProps().id, status: 'AGUARDANDO_DIAGNOSTICO' },
+      data: expect.objectContaining({ status: 'EM_DIAGNOSTICO', responsavelId: 'mec-1' }),
+    });
+    expect(prisma.execucao.updateMany.mock.calls[0][0].data).not.toHaveProperty('id');
   });
 
   it('listar filtra por status e responsavel, ordenando por createdAt', async () => {

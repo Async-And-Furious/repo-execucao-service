@@ -3,6 +3,7 @@ const mockProducer = {
   send: jest.fn().mockResolvedValue(undefined),
   disconnect: jest.fn(),
 };
+const logger = { error: jest.fn() };
 interface MockKafkaInstance {
   options: Record<string, unknown>;
   producer: jest.Mock<unknown, unknown[]>;
@@ -27,9 +28,12 @@ describe('KafkaExecucaoEventPublisher', () => {
   });
 
   it('publishes the ADR envelope keyed and correlated by order ID with idempotence and acks=-1', async () => {
-    const publisher = new KafkaExecucaoEventPublisher({
-      get: (key: string) => (({ KAFKA_BROKERS: 'kafka:9092' }) as Record<string, string>)[key],
-    } as never);
+    const publisher = new KafkaExecucaoEventPublisher(
+      {
+        get: (key: string) => (({ KAFKA_BROKERS: 'kafka:9092' }) as Record<string, string>)[key],
+      } as never,
+      logger as never
+    );
     const event = new DiagnosticoIniciado({
       execucaoId: 'ex-1',
       ordemServicoId: 'os-1',
@@ -52,7 +56,7 @@ describe('KafkaExecucaoEventPublisher', () => {
       eventId: expect.any(String),
       eventType: 'DiagnosticoIniciado',
       eventVersion: 1,
-      occurredAt: expect.any(String),
+      occurredAt: event.data.diagnosticoIniciadoEm,
       producer: 'execucao-producao-service',
       correlationId: 'os-1',
       data: event.data,
@@ -63,9 +67,12 @@ describe('KafkaExecucaoEventPublisher', () => {
     mockProducer.connect
       .mockRejectedValueOnce(new Error('broker unavailable'))
       .mockResolvedValueOnce(undefined);
-    const publisher = new KafkaExecucaoEventPublisher({
-      get: (key: string) => (({ KAFKA_BROKERS: 'kafka:9092' }) as Record<string, string>)[key],
-    } as never);
+    const publisher = new KafkaExecucaoEventPublisher(
+      {
+        get: (key: string) => (({ KAFKA_BROKERS: 'kafka:9092' }) as Record<string, string>)[key],
+      } as never,
+      logger as never
+    );
     const event = new DiagnosticoIniciado({
       execucaoId: 'ex-1',
       ordemServicoId: 'os-1',
@@ -80,12 +87,15 @@ describe('KafkaExecucaoEventPublisher', () => {
   });
 
   it('uses SASL only when both configured env values exist and rejects partial credentials', () => {
-    new KafkaExecucaoEventPublisher({
-      get: (key: string) =>
-        (({ KAFKA_SASL_USERNAME: 'user', KAFKA_SASL_PASSWORD: 'pass' }) as Record<string, string>)[
-          key
-        ],
-    } as never);
+    new KafkaExecucaoEventPublisher(
+      {
+        get: (key: string) =>
+          (
+            ({ KAFKA_SASL_USERNAME: 'user', KAFKA_SASL_PASSWORD: 'pass' }) as Record<string, string>
+          )[key],
+      } as never,
+      logger as never
+    );
     expect(mockKafkaInstances[0].options.sasl).toEqual({
       mechanism: 'plain',
       username: 'user',
@@ -93,9 +103,33 @@ describe('KafkaExecucaoEventPublisher', () => {
     });
     expect(
       () =>
-        new KafkaExecucaoEventPublisher({
-          get: (key: string) => (key === 'KAFKA_SASL_PASSWORD' ? 'pass' : undefined),
-        } as never)
+        new KafkaExecucaoEventPublisher(
+          {
+            get: (key: string) => (key === 'KAFKA_SASL_PASSWORD' ? 'pass' : undefined),
+          } as never,
+          logger as never
+        )
     ).toThrow('Both KAFKA_SASL_USERNAME and KAFKA_SASL_PASSWORD are required');
+  });
+
+  it('logs safe correlation fields and rethrows a publish failure', async () => {
+    const error = new Error('broker unavailable');
+    mockProducer.send.mockRejectedValueOnce(error);
+    const publisher = new KafkaExecucaoEventPublisher(
+      { get: () => undefined } as never,
+      logger as never
+    );
+    const event = new DiagnosticoIniciado({
+      execucaoId: 'ex-1',
+      ordemServicoId: 'os-1',
+      responsavelId: null,
+      diagnosticoIniciadoEm: '2026-11-01T00:00:00.000Z',
+    });
+
+    await expect(publisher.publish(event)).rejects.toBe(error);
+    expect(logger.error).toHaveBeenCalledWith(
+      { ordemServicoId: 'os-1', eventType: 'DiagnosticoIniciado', correlationId: 'os-1' },
+      'Saga event publish failed after database commit'
+    );
   });
 });

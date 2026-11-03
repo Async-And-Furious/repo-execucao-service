@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { Kafka } from 'kafkajs';
 import type { Producer } from 'kafkajs';
 import { randomUUID } from 'node:crypto';
+import { PinoLogger } from 'nestjs-pino';
 import { EventoExecucao } from '../../domain/events/execucao.events';
 import { IExecucaoEventPublisher } from '../../domain/ports/execucao-event-publisher';
 
@@ -11,11 +12,14 @@ export class KafkaExecucaoEventPublisher implements IExecucaoEventPublisher, OnM
   private readonly producer: Producer;
   private connected?: Promise<void>;
 
-  constructor(config: ConfigService) {
+  constructor(
+    config: ConfigService,
+    private readonly pino: PinoLogger
+  ) {
     const username = config.get<string>('KAFKA_SASL_USERNAME');
     const password = config.get<string>('KAFKA_SASL_PASSWORD');
     this.producer = new Kafka({
-      clientId: 'execucao-service',
+      clientId: 'execucao-producao-service',
       brokers: (config.get<string>('KAFKA_BROKERS') ?? 'localhost:9092').split(','),
       ...(username || password
         ? username && password
@@ -28,25 +32,43 @@ export class KafkaExecucaoEventPublisher implements IExecucaoEventPublisher, OnM
   }
 
   async publish(evento: EventoExecucao): Promise<void> {
-    await this.connect();
-    await this.producer.send({
-      topic: 'execucao.eventos.v1',
-      acks: -1,
-      messages: [
+    const occurredAt =
+      'diagnosticoIniciadoEm' in evento.data
+        ? evento.data.diagnosticoIniciadoEm
+        : 'reparoIniciadoEm' in evento.data
+          ? evento.data.reparoIniciadoEm
+          : evento.data.concluidaEm;
+    try {
+      await this.connect();
+      await this.producer.send({
+        topic: 'execucao.eventos.v1',
+        acks: -1,
+        messages: [
+          {
+            key: evento.data.ordemServicoId,
+            value: JSON.stringify({
+              eventId: randomUUID(),
+              eventType: evento.eventType,
+              eventVersion: 1,
+              occurredAt,
+              producer: 'execucao-producao-service',
+              correlationId: evento.correlationId,
+              data: evento.data,
+            }),
+          },
+        ],
+      });
+    } catch (error) {
+      this.pino.error(
         {
-          key: evento.data.ordemServicoId,
-          value: JSON.stringify({
-            eventId: randomUUID(),
-            eventType: evento.eventType,
-            eventVersion: 1,
-            occurredAt: new Date().toISOString(),
-            producer: 'execucao-producao-service',
-            correlationId: evento.correlationId,
-            data: evento.data,
-          }),
+          ordemServicoId: evento.data.ordemServicoId,
+          eventType: evento.eventType,
+          correlationId: evento.correlationId,
         },
-      ],
-    });
+        'Saga event publish failed after database commit'
+      );
+      throw error;
+    }
   }
 
   async onModuleDestroy(): Promise<void> {

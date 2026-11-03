@@ -38,30 +38,13 @@ export class PrismaExecucaoRepository implements IExecucaoRepository {
     return row ? Execucao.restaurar(row) : null;
   }
 
-  async save(execucao: Execucao): Promise<void> {
+  async save(execucao: Execucao, expectedStatus: ExecucaoStatus): Promise<boolean> {
     const { id, ...data } = execucao.toProps();
-    await this.prisma.execucao.update({ where: { id }, data });
-  }
-
-  async transition(
-    id: string,
-    from: ExecucaoStatus[],
-    to: ExecucaoStatus,
-    at: Date,
-    fields: {
-      responsavelId?: string;
-      diagnosticoIniciadoEm?: Date;
-      reparoIniciadoEm?: Date;
-      concluidaEm?: Date;
-    } = {}
-  ): Promise<{ execucao: Execucao | null; changed: boolean }> {
     const result = await this.prisma.execucao.updateMany({
-      where: { id, status: { in: from } },
-      data: { status: to, updatedAt: at, ...fields },
+      where: { id, status: expectedStatus },
+      data,
     });
-    return result.count === 1
-      ? { execucao: null, changed: true }
-      : { execucao: await this.findById(id), changed: false };
+    return result.count === 1;
   }
 
   async listar({ status, responsavelId }: FiltroFilaExecucao): Promise<Execucao[]> {
