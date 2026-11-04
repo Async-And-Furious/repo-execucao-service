@@ -16,7 +16,7 @@ PostgreSQL, banco `execucao_producao`, role `execucao_app` na instancia RDS unic
 
 ## Estratégia de Saga
 
-O fluxo de Ordem de Serviço é coordenado por uma Saga coreografada (ADR-0016): não há orquestrador nem chamadas REST entre microsserviços. Cada serviço publica e consome eventos Kafka com correlationId = ordemServicoId. Esta escolha reduz acoplamento síncrono, mas abre mão de uma visão central do estado da Saga e de um único ponto de timeout; cada serviço responde por suas transições, retries e compensações. Veja a [ADR-0016 — Saga coreografada](https://github.com/Async-And-Furious/async-furious-project/blob/develop/docs/adr/0016-saga-coreografada.md) e o [fluxo completo da Saga](https://github.com/Async-And-Furious/async-furious-project/blob/develop/docs/architecture/saga-flow.md).
+O fluxo de Ordem de Serviço é coordenado por uma Saga coreografada (ADR-0016): não há orquestrador nem chamadas REST entre microsserviços. Cada serviço publica e consome eventos Kafka com correlationId = ordemServicoId. Esta escolha reduz acoplamento síncrono, mas abre mão de uma visão central do estado da Saga e de um único ponto de timeout; cada serviço responde por suas transições, retries e compensações. Veja a [ADR-0016: Saga coreografada](https://github.com/Async-And-Furious/async-furious-project/blob/develop/docs/adr/0016-saga-coreografada.md) e o [fluxo completo da Saga](https://github.com/Async-And-Furious/async-furious-project/blob/develop/docs/architecture/saga-flow.md). Variáveis de ambiente do Kafka e SASL: veja "Dependências de entrada e configuração" em [docs/architecture.md](docs/architecture.md).
 
 ## Autenticacao
 

@@ -43,11 +43,24 @@ O serviço é um participante da Saga coreografada. `correlationId` e chave Kafk
 
 Os três eventos são publicados depois da transição local no PostgreSQL. O produtor usa KafkaJS idempotente e `acks=-1`. Falhas técnicas têm até três tentativas totais, com backoff e `notBefore`, via `execucao.retry.v1`; falhas de negócio, envelopes inválidos e tentativas esgotadas são encaminhados a `execucao.dlt.v1`. O consumidor pausa apenas a partição em espera de backoff.
 
+**Limitação conhecida:** não há outbox (ADR-0018). Se a publicação falhar depois do `UPDATE`, o estado local permanece gravado e o evento se perde; reprocessar Kafka não recupera uma mensagem que nunca chegou ao broker, e o detector de OS parada do OS Service cobre apenas `aprovacao-pagamento`. A reconciliação entre OS e Execução é manual.
+
 O processamento de DLT e sua conversão em `EtapaDaSagaFalhou` pertencem ao Saga Epic e **não são implementados aqui**. O serviço não consome `execucao.dlt.v1` nem declara essa compensação como concluída.
 
 ## Persistência e ownership
 
-O serviço é dono do seu banco PostgreSQL (`execucao_producao`) e da credencial de aplicação (`execucao_app`). O modelo `Execucao` guarda o estado da fila e tem `ordemServicoId` único. Não existe FK para a OS, cópia de dados de outro serviço ou acesso cruzado a tabelas. O PostgreSQL/RDS é uma dependência do serviço; detalhes de provisionamento e credenciais pertencem à infraestrutura compartilhada.
+O serviço é dono do seu banco PostgreSQL (`execucao_producao`) e da credencial de aplicação (`execucao_app`). O modelo `Execucao` guarda o estado da fila e tem `ordemServicoId` único.
+
+| Coluna (`execucoes`) | Tipo | Observação |
+|---|---|---|
+| `id` | texto, PK | Identificador da execução. |
+| `ordem_servico_id` | texto, único | Referência lógica à OS, sem FK. |
+| `status` | enum `ExecucaoStatus` | `AGUARDANDO_DIAGNOSTICO` (padrão), `EM_DIAGNOSTICO`, `AGUARDANDO_REPARO`, `EM_REPARO`, `CONCLUIDA`, `CANCELADA`. |
+| `responsavel_id` | texto, opcional | `sub` do mecânico que iniciou o diagnóstico. |
+| `diagnostico_iniciado_em`, `reparo_iniciado_em`, `concluida_em` | timestamp, opcionais | Instantes das transições. |
+| `created_at`, `updated_at` | timestamp | Auditoria. |
+
+O índice `(status, created_at)` sustenta a fila de diagnóstico e de reparo. Não existe FK para a OS, cópia de dados de outro serviço ou acesso cruzado a tabelas. O PostgreSQL/RDS é uma dependência do serviço; detalhes de provisionamento e credenciais pertencem à infraestrutura compartilhada.
 
 O modelo/tabela legado `ProcessedEvent`/`processed_events` ainda aparece no schema e na migration inicial, mas o fluxo desta Saga não o consulta nem o usa para deduplicação. A deduplicação é feita pela unicidade da OS e pelas guardas de estado.
 
@@ -78,8 +91,8 @@ Se o broker exigir SASL/PLAIN, configure também as duas variáveis `KAFKA_SASL_
 
 Esta documentação descreve contratos e código do repositório. O funcionamento, roteamento, tópicos, permissões e conectividade **em HML não foram verificados**; não se deve inferir implantação ou disponibilidade a partir deste documento.
 
-Referências centrais: [ADR-0016 — Saga coreografada](https://github.com/Async-And-Furious/async-furious-project/blob/develop/docs/adr/0016-saga-coreografada.md), [fluxo da Saga](https://github.com/Async-And-Furious/async-furious-project/blob/develop/docs/architecture/saga-flow.md), [catálogo de eventos](https://github.com/Async-And-Furious/async-furious-project/blob/develop/docs/architecture/event-catalog.md) e [topologia de borda](https://github.com/Async-And-Furious/async-furious-project/blob/develop/docs/architecture/edge-topology.md).
+Referências centrais: [ADR-0016: Saga coreografada](https://github.com/Async-And-Furious/async-furious-project/blob/develop/docs/adr/0016-saga-coreografada.md), [fluxo da Saga](https://github.com/Async-And-Furious/async-furious-project/blob/develop/docs/architecture/saga-flow.md), [catálogo de eventos](https://github.com/Async-And-Furious/async-furious-project/blob/develop/docs/architecture/event-catalog.md) e [topologia de borda](https://github.com/Async-And-Furious/async-furious-project/blob/develop/docs/architecture/edge-topology.md).
 
 ## ADRs transversais
 
-[ADR-0016 — Saga coreografada](https://github.com/Async-And-Furious/async-furious-project/blob/develop/docs/adr/0016-saga-coreografada.md) · [ADR-0017 — Divisão dos microsserviços e ownership de dados](https://github.com/Async-And-Furious/async-furious-project/blob/develop/docs/adr/0017-divisao-microsservicos-ownership-dados.md) · [ADR-0018 — Mensageria e contratos de eventos](https://github.com/Async-And-Furious/async-furious-project/blob/develop/docs/adr/0018-mensageria-contratos-eventos.md) · [ADR-0019 — DocumentDB como read model de OS e cliente](https://github.com/Async-And-Furious/async-furious-project/blob/develop/docs/adr/0019-documentdb-read-model-os-cliente.md) · [ADR-0020 — Bancos compartilhados e isolamento por credencial](https://github.com/Async-And-Furious/async-furious-project/blob/develop/docs/adr/0020-bancos-compartilhados-isolamento-credencial.md) · [ADR-0021 — Borda sem BFF](https://github.com/Async-And-Furious/async-furious-project/blob/develop/docs/adr/0021-borda-sem-bff.md).
+[ADR-0016: Saga coreografada](https://github.com/Async-And-Furious/async-furious-project/blob/develop/docs/adr/0016-saga-coreografada.md) · [ADR-0017: Divisão dos microsserviços e ownership de dados](https://github.com/Async-And-Furious/async-furious-project/blob/develop/docs/adr/0017-divisao-microsservicos-ownership-dados.md) · [ADR-0018: Mensageria e contratos de eventos](https://github.com/Async-And-Furious/async-furious-project/blob/develop/docs/adr/0018-mensageria-contratos-eventos.md) · [ADR-0019: DocumentDB como read model de OS e cliente](https://github.com/Async-And-Furious/async-furious-project/blob/develop/docs/adr/0019-documentdb-read-model-os-cliente.md) · [ADR-0020: Bancos compartilhados e isolamento por credencial](https://github.com/Async-And-Furious/async-furious-project/blob/develop/docs/adr/0020-bancos-compartilhados-isolamento-credencial.md) · [ADR-0021: Borda sem BFF](https://github.com/Async-And-Furious/async-furious-project/blob/develop/docs/adr/0021-borda-sem-bff.md).
