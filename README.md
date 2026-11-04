@@ -14,9 +14,9 @@ PostgreSQL, banco `execucao_producao`, role `execucao_app` na instancia RDS unic
 
 **Este servico nao hospeda NoSQL.** "O Execucao era quem ia levar o NoSQL" foi hipotese de trabalho durante o planejamento e nao vale mais: a saga e coreografada (nao existe orquestrador) e o DocumentDB ganhou uso de negocio como read model de OS e Cliente dentro do OS Service, o que ja cumpre o requisito de NoSQL do enunciado. A fila e o ciclo de execucao cabem em PostgreSQL. Se o assunto voltar, a regra de convivencia seria a mesma do relacional: tabela propria por servico, IAM policy restrita a ela, nunca acesso cruzado.
 
-## Estrategia de Saga
+## Estratégia de Saga
 
-**Coreografada.** Consumidor `execucao-consumer` assina `os.eventos.v1`, `billing.eventos.v1` e `execucao.retry.v1`; o produtor publica em `execucao.eventos.v1`. Retries usam `execucao.retry.v1` com ate tres tentativas totais e backoff; erros de negocio e eventos que esgotam tentativas vao para `execucao.dlt.v1`. O processamento DLT para `EtapaDaSagaFalhou` pertence ao Epic da Saga e nao e tratado aqui. Configure `KAFKA_BROKERS` e, quando autenticado, `KAFKA_SASL_USERNAME`/`KAFKA_SASL_PASSWORD`.
+O fluxo de Ordem de Serviço é coordenado por uma Saga coreografada (ADR-0016): não há orquestrador nem chamadas REST entre microsserviços. Cada serviço publica e consome eventos Kafka com correlationId = ordemServicoId. Esta escolha reduz acoplamento síncrono, mas abre mão de uma visão central do estado da Saga e de um único ponto de timeout; cada serviço responde por suas transições, retries e compensações. Veja a [ADR-0016: Saga coreografada](https://github.com/Async-And-Furious/async-furious-project/blob/develop/docs/adr/0016-saga-coreografada.md) e o [fluxo completo da Saga](https://github.com/Async-And-Furious/async-furious-project/blob/develop/docs/architecture/saga-flow.md). Variáveis de ambiente do Kafka e SASL: veja "Dependências de entrada e configuração" em [docs/architecture.md](docs/architecture.md).
 
 ## Autenticacao
 
