@@ -62,7 +62,8 @@ NEW_RELIC_ENABLED=false NEW_RELIC_NO_CONFIG_FILE=true NEW_RELIC_LICENSE_KEY= \
 ```
 
 - Healthcheck: `/api/v1/health`, `/api/v1/health/live`, `/api/v1/health/ready`
-- Swagger: `/api/docs/execucao`
+- Swagger: `/api/docs/execucao` (em HML, `<ALB>/api/docs/execucao`)
+- Contrato versionado: [`docs/openapi.json`](docs/openapi.json), gerado dos decorators por `pnpm openapi:export`. O workflow `OpenAPI` falha se o arquivo não bater com o código.
 
 ## Kubernetes
 
