@@ -6,7 +6,7 @@ Stack: NestJS 10, Prisma 5, PostgreSQL, Node 22, pnpm. Quatro camadas por modulo
 
 ## Origem
 
-Scaffold **copiado** do OS Service, sem fork, sem pacote npm compartilhado e sem submodulo git. Nenhum model do monolito foi herdado. O unico model inicial e `ProcessedEvent` (idempotencia por `eventId`), porque o Prisma 5 nao gera o client com schema sem models.
+Scaffold **copiado** do OS Service, sem fork, sem pacote npm compartilhado e sem submodulo git. `processed_events` e legado, criado pela migration inicial historica; a nova migration remove a tabela somente quando vazia, sob lock exclusivo, e aborta se encontrar dados. A migration inicial nao foi alterada. A idempotencia da Saga depende dos estados atuais e da unicidade de `ordemServicoId`.
 
 ## Banco de dados
 
@@ -16,7 +16,7 @@ PostgreSQL, banco `execucao_producao`, role `execucao_app` na instancia RDS unic
 
 ## Estrategia de Saga
 
-**Coreografada.** Nao ha orquestrador: cada servico reage a eventos do Kafka e publica os seus. Este servico ainda nao tem consumidor implementado; apenas as variaveis de cliente (`KAFKA_BROKERS`, `KAFKA_SASL_USERNAME`, `KAFKA_SASL_PASSWORD`, `KAFKA_CONSUMER_GROUP`) estao no configmap/secret.
+**Coreografada.** Consumidor `execucao-consumer` assina `os.eventos.v1`, `billing.eventos.v1` e `execucao.retry.v1`; o produtor publica em `execucao.eventos.v1`. Retries usam `execucao.retry.v1` com ate tres tentativas totais e backoff; erros de negocio e eventos que esgotam tentativas vao para `execucao.dlt.v1`. O processamento DLT para `EtapaDaSagaFalhou` pertence ao Epic da Saga e nao e tratado aqui. Configure `KAFKA_BROKERS` e, quando autenticado, `KAFKA_SASL_USERNAME`/`KAFKA_SASL_PASSWORD`.
 
 ## Autenticacao
 
@@ -33,7 +33,7 @@ Todas com `@Roles(Role.MECANICO)`. A `Execucao` nasce quando o servico consome `
 | `PATCH` | `/api/v1/execucoes/{id}/iniciar-reparo` | `AGUARDANDO_REPARO` para `EM_REPARO` | `ExecucaoIniciada` |
 | `PATCH` | `/api/v1/execucoes/{id}/concluir` | `EM_REPARO` para `CONCLUIDA` | `ExecucaoConcluida` |
 
-Transicao invalida responde 400; id inexistente, 404. Os eventos por enquanto so vao para o log (`LogExecucaoEventPublisher`); a publicacao no Kafka entra na Feature de Eventos.
+Transicao invalida responde 400; id inexistente, 404. As transicoes da API e da Saga usam updates condicionais no banco para evitar sobrescrita por leitura obsoleta. Eventos de saida sao publicados no Kafka depois do commit local.
 
 ## Seed
 
@@ -67,6 +67,10 @@ NEW_RELIC_ENABLED=false NEW_RELIC_NO_CONFIG_FILE=true NEW_RELIC_LICENSE_KEY= \
 ## Kubernetes
 
 Manifests em `k8s/`: namespace `execucao`, Deployment, Service, migration Job, configmap e secret. Namespace, ECR proprio e banco/role sao provisionados pelo Epic #312. Workflows de CI/CD e protecao de branch ficam para a Feature de Testes e Pipeline.
+
+## Recuperacao de publicacao da Saga
+
+As transicoes sao persistidas com compare-and-swap antes da publicacao Kafka. Se o publish falhar depois do commit, o publisher registra `ordemServicoId`, `eventType` e `correlationId` e propaga o erro. Reprocessar Kafka nao recupera uma mensagem que nunca chegou ao broker. Este servico nao possui endpoint webhook de recuperacao; reconciliacao e manual entre OS e Execucao, ate existir procedimento aprovado. Este PR nao alega replay automatico.
 
 ## Observabilidade — onboarding parcial (#343)
 

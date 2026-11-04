@@ -1,5 +1,11 @@
 import { IncomingMessage } from 'node:http';
-import { logContext, pinoHttpOptions, resolveCorrelationId } from './pino-logger.config';
+import {
+  currentLogContext,
+  logContext,
+  pinoHttpOptions,
+  resolveCorrelationId,
+  runWithLogContext,
+} from './pino-logger.config';
 
 describe('pino-logger.config', () => {
   it('reaproveita x-correlation-id valido', () => {
@@ -16,6 +22,12 @@ describe('pino-logger.config', () => {
     expect(logContext({ ordemServicoId: 'os-1', eventId: 'ev-1' })).toEqual({
       ordemServicoId: 'os-1',
       eventId: 'ev-1',
+    });
+  });
+
+  it('mixin propaga o contexto AsyncLocalStorage para logs Pino', () => {
+    runWithLogContext({ eventId: 'ev-2', ordemServicoId: 'os-2' }, () => {
+      expect(pinoHttpOptions.mixin?.({}, 30, {} as never)).toEqual(currentLogContext());
     });
   });
 });

@@ -1,4 +1,5 @@
 import { EntityNotFoundException } from '../../../../shared/domain/exceptions/entity-not-found.exception';
+import { DomainException } from '../../../../shared/domain/exceptions/domain.exception';
 import { Execucao, ExecucaoStatus } from '../../domain/entities/execucao.entity';
 import {
   DiagnosticoIniciado,
@@ -26,9 +27,6 @@ function marco(execucao: Execucao): MarcoExecucaoData {
   return { execucaoId: id, ordemServicoId, responsavelId };
 }
 
-// ponytail: save e publish fora de transacao; se o publish falhar o estado ja foi gravado.
-// Outbox entra na Feature de Eventos, junto com o adapter Kafka.
-
 // Porta de AssumirOrdemServicoUseCase + AnalisarVeiculoUseCase do monolito.
 export class IniciarDiagnosticoUseCase {
   constructor(
@@ -40,7 +38,8 @@ export class IniciarDiagnosticoUseCase {
     const execucao = await buscarExecucao(this.repo, id);
     const agora = new Date();
     execucao.iniciarDiagnostico(responsavelId, agora);
-    await this.repo.save(execucao);
+    if (!(await this.repo.save(execucao, ExecucaoStatus.AGUARDANDO_DIAGNOSTICO)))
+      throw new DomainException('Execução mudou durante o início do diagnóstico; tente novamente');
     await this.publisher.publish(
       new DiagnosticoIniciado({ ...marco(execucao), diagnosticoIniciadoEm: agora.toISOString() })
     );
@@ -59,7 +58,8 @@ export class IniciarReparoUseCase {
     const execucao = await buscarExecucao(this.repo, id);
     const agora = new Date();
     execucao.iniciarReparo(agora);
-    await this.repo.save(execucao);
+    if (!(await this.repo.save(execucao, ExecucaoStatus.AGUARDANDO_REPARO)))
+      throw new DomainException('Execução mudou durante o início do reparo; tente novamente');
     await this.publisher.publish(
       new ExecucaoIniciada({ ...marco(execucao), reparoIniciadoEm: agora.toISOString() })
     );
@@ -78,7 +78,8 @@ export class ConcluirExecucaoUseCase {
     const execucao = await buscarExecucao(this.repo, id);
     const agora = new Date();
     execucao.concluir(agora);
-    await this.repo.save(execucao);
+    if (!(await this.repo.save(execucao, ExecucaoStatus.EM_REPARO)))
+      throw new DomainException('Execução mudou durante a conclusão; tente novamente');
     await this.publisher.publish(
       new ExecucaoConcluida({ ...marco(execucao), concluidaEm: agora.toISOString() })
     );

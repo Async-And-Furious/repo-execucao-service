@@ -8,8 +8,9 @@ export interface FiltroFilaExecucao {
 }
 
 export interface IExecucaoRepository {
-  create(execucao: Execucao): Promise<void>;
+  create(execucao: Execucao): Promise<boolean>;
   findById(id: string): Promise<Execucao | null>;
-  save(execucao: Execucao): Promise<void>;
+  findByOrdemServicoId(id: string): Promise<Execucao | null>;
+  save(execucao: Execucao, expectedStatus: ExecucaoStatus): Promise<boolean>;
   listar(filtro: FiltroFilaExecucao): Promise<Execucao[]>;
 }

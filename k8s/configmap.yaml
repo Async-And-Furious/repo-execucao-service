@@ -11,7 +11,7 @@ data:
   JWT_AUDIENCE: async-furious-project
   JWT_EXPIRES_IN: '1800'
   KAFKA_BROKERS: ${kafka_brokers}
-  KAFKA_CONSUMER_GROUP: execucao-service
+  KAFKA_CONSUMER_GROUP: execucao-consumer
   NEW_RELIC_NO_CONFIG_FILE: 'true'
   NEW_RELIC_APP_NAME: 'af-execucao-hml'
   NEW_RELIC_DISTRIBUTED_TRACING_ENABLED: 'true'

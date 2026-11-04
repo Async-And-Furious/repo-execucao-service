@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import type { Options } from 'pino-http';
+import { AsyncLocalStorage } from 'node:async_hooks';
 
 const CORRELATION_ID_HEADER = 'x-correlation-id';
 const CORRELATION_ID_PATTERN = /^[a-zA-Z0-9._:-]{1,128}$/;
@@ -17,7 +18,8 @@ export const pinoHttpOptions: Options = {
     response.setHeader(CORRELATION_ID_HEADER, correlationId);
     return correlationId;
   },
-  customProps: (request) => ({ correlationId: request.id }),
+  customProps: (request) => ({ ...currentLogContext(), correlationId: request.id }),
+  mixin: (_context, _level, _logger) => currentLogContext(),
   customLogLevel: (_request, response, error) => {
     if (error || response.statusCode >= 500) return 'error';
     if (response.statusCode >= 400) return 'warn';
@@ -33,8 +35,19 @@ export const pinoHttpOptions: Options = {
 export interface LogContext {
   ordemServicoId?: string;
   eventId?: string;
+  correlationId?: string;
 }
 
+const eventLogContext = new AsyncLocalStorage<LogContext>();
+
 export function logContext(context: LogContext): LogContext {
-  return context;
+  return { ...eventLogContext.getStore(), ...context };
+}
+
+export function runWithLogContext<T>(context: LogContext, callback: () => T): T {
+  return eventLogContext.run(context, callback);
+}
+
+export function currentLogContext(): LogContext {
+  return eventLogContext.getStore() ?? {};
 }
