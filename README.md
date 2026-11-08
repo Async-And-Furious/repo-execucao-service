@@ -22,6 +22,8 @@ O fluxo de Ordem de Serviço é coordenado por uma Saga coreografada (ADR-0016):
 
 `src/auth/` e a variante stateless do JWT local (ADR-0021): `JwtStrategy` valida localmente e devolve `{ id: sub, email, role }`, sem Prisma e sem `AuthService`. Token sem `role` vira `Role.CLIENTE` e recebe 403 em rota com `@Roles`. Role fora do enum e rejeitada com 401. O `sub` fica em `request.user.id`, via `@CurrentUser('id')`, e e gravado como `responsavelId` em `iniciar-diagnostico`.
 
+Throttling usa `user:<id>` somente depois da autenticacao JWT; rotas `@Public` e JWTs invalidos usam `ip:<req.ip>`. `X-Forwarded-For` nao e confiavel: `trust proxy` nao esta habilitado, portanto trafego publico e invalido atras do mesmo proxy compartilha a cota IP do proxy.
+
 ## Rotas
 
 Todas com `@Roles(Role.MECANICO)`. A `Execucao` nasce quando o servico consome `OrdemServicoRecebida` (Feature de Eventos); nao existe rota de criacao.
