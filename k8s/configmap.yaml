@@ -19,3 +19,6 @@ data:
   NEW_RELIC_APPLICATION_LOGGING_LOCAL_DECORATING_ENABLED: 'true'
   NEW_RELIC_APPLICATION_LOGGING_FORWARDING_ENABLED: 'false'
   NEW_RELIC_LOG: 'stdout'
+  # newrelic 14.x: instrumentação do kafkajs atrás de feature flag prerelease (desligada por padrão).
+  # Sem ela o trace distribuído não atravessa o broker (#343/#344).
+  NEW_RELIC_FEATURE_FLAG_KAFKAJS_INSTRUMENTATION: 'true'

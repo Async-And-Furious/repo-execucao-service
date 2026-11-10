@@ -25,6 +25,7 @@ describe('New Relic onboarding contract', () => {
       NEW_RELIC_APPLICATION_LOGGING_LOCAL_DECORATING_ENABLED: 'true',
       NEW_RELIC_APPLICATION_LOGGING_FORWARDING_ENABLED: 'false',
       NEW_RELIC_LOG: 'stdout',
+      NEW_RELIC_FEATURE_FLAG_KAFKAJS_INSTRUMENTATION: 'true',
     };
 
     for (const [key, value] of Object.entries(expected)) {
