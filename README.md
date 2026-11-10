@@ -96,12 +96,12 @@ Fornecer estas variaveis **antes de iniciar o processo**: o `ConfigModule` le
 | `NEW_RELIC_APPLICATION_LOGGING_LOCAL_DECORATING_ENABLED` | `true` | `true` |
 | `NEW_RELIC_APPLICATION_LOGGING_FORWARDING_ENABLED` | `false` | `false` |
 | `NEW_RELIC_LOG` | `stdout` | `stdout` |
-| `NEW_RELIC_FEATURE_FLAG_KAFKAJS_INSTRUMENTATION` | `true` | `true` |
 
 O log do agente usa stdout para nao exigir escrita no container nao-root.
-Na versao 14.x do agente, a instrumentacao do `kafkajs` fica atras da feature flag
-`kafkajs_instrumentation`, desligada por padrao. Sem ela, o agente nao propaga o
-trace distribuido pelos headers das mensagens e o trace nao atravessa o broker.
+A feature flag `kafkajs_instrumentation` do agente fica desligada de proposito: na
+versao 14.x, o wrapper do `eachMessage` nao devolve a promise do handler, e o kafkajs
+confirmaria o offset antes do processamento. O trace pelo broker deve propagar os
+headers no codigo (#344).
 Forwarding pelo agente fica desligado para nao duplicar o envio pelo Fluent Bit.
 O log tardio de "request completed" do pino-http pode nao carregar `trace.id`.
 O trace comeca no primeiro servico: **API Gateway → Lambda/Authorizer nao e
