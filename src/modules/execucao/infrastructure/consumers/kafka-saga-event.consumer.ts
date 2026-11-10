@@ -7,6 +7,10 @@ import { PinoLogger } from 'nestjs-pino';
 import { SagaEventHandler, SagaEnvelope } from '../../application/use-cases/saga-event.handler';
 import type { IExecucaoRepository } from '../../domain/ports/execucao.repository';
 import { runWithLogContext } from '../../../../shared/infrastructure/logging/pino-logger.config';
+import {
+  comTransacaoDeConsumo,
+  injetarHeadersTrace,
+} from '../../../../shared/infrastructure/observability/kafka-trace';
 
 const RETRY_TOPIC = 'execucao.retry.v1';
 const DLT_TOPIC = 'execucao.dlt.v1';
@@ -126,115 +130,117 @@ export class KafkaSagaEventConsumer implements OnModuleInit, OnModuleDestroy {
     await this.consumer.subscribe({ topic: RETRY_TOPIC, fromBeginning: true });
     await this.consumer.run({
       partitionsConsumedConcurrently: 4,
-      eachMessage: async (payload) => {
-        const { topic, partition, message } = payload;
-        if (!message.value) {
-          await this.sendInvalidEnvelope(
-            topic,
-            message.key?.toString(),
-            'Kafka message has no value'
-          );
-          return;
-        }
-        let parsed: SagaEnvelope & {
-          retry?: { attempt: number; firstFailedAt: string; notBefore: string };
-        };
-        try {
-          const candidate: unknown = JSON.parse(message.value.toString());
-          if (!isEnvelope(candidate, message.key?.toString()))
-            throw new Error('Invalid Kafka event envelope');
-          parsed = candidate;
-        } catch {
-          const invalidKey = message.key?.toString() ?? null;
-          await this.sendInvalidEnvelope(
-            topic,
-            invalidKey ?? undefined,
-            'Invalid Kafka event envelope'
-          );
-          return;
-        }
-        const orderValue = parsed.data?.ordemServicoId;
-        const orderId = typeof orderValue === 'string' ? orderValue : undefined;
-        const eventId = parsed.eventId;
-        const correlationId = typeof orderId === 'string' ? orderId : parsed.correlationId;
-        await runWithLogContext(
-          {
-            eventId,
-            correlationId,
-            ordemServicoId: typeof orderId === 'string' ? orderId : undefined,
-          },
-          async () => {
-            this.pino.info(
-              { eventId, correlationId, ordemServicoId: orderId },
-              'Saga event received'
+      // A transação de consumo cobre a mensagem inteira: validação, handler, retry e DLT.
+      eachMessage: (payload) =>
+        comTransacaoDeConsumo(payload.topic, payload.message.headers, async () => {
+          const { topic, partition, message } = payload;
+          if (!message.value) {
+            await this.sendInvalidEnvelope(
+              topic,
+              message.key?.toString(),
+              'Kafka message has no value'
             );
-            if (topic === RETRY_TOPIC && parsed.retry?.notBefore) {
-              const waitMs = Date.parse(parsed.retry.notBefore) - Date.now();
-              if (waitMs > 0) {
-                this.consumer.pause([{ topic, partitions: [partition] }]);
-                try {
-                  await waitForRetry(waitMs, () => payload.heartbeat());
-                } finally {
-                  this.consumer.resume([{ topic, partitions: [partition] }]);
+            return;
+          }
+          let parsed: SagaEnvelope & {
+            retry?: { attempt: number; firstFailedAt: string; notBefore: string };
+          };
+          try {
+            const candidate: unknown = JSON.parse(message.value.toString());
+            if (!isEnvelope(candidate, message.key?.toString()))
+              throw new Error('Invalid Kafka event envelope');
+            parsed = candidate;
+          } catch {
+            const invalidKey = message.key?.toString() ?? null;
+            await this.sendInvalidEnvelope(
+              topic,
+              invalidKey ?? undefined,
+              'Invalid Kafka event envelope'
+            );
+            return;
+          }
+          const orderValue = parsed.data?.ordemServicoId;
+          const orderId = typeof orderValue === 'string' ? orderValue : undefined;
+          const eventId = parsed.eventId;
+          const correlationId = typeof orderId === 'string' ? orderId : parsed.correlationId;
+          await runWithLogContext(
+            {
+              eventId,
+              correlationId,
+              ordemServicoId: typeof orderId === 'string' ? orderId : undefined,
+            },
+            async () => {
+              this.pino.info(
+                { eventId, correlationId, ordemServicoId: orderId },
+                'Saga event received'
+              );
+              if (topic === RETRY_TOPIC && parsed.retry?.notBefore) {
+                const waitMs = Date.parse(parsed.retry.notBefore) - Date.now();
+                if (waitMs > 0) {
+                  this.consumer.pause([{ topic, partitions: [partition] }]);
+                  try {
+                    await waitForRetry(waitMs, () => payload.heartbeat());
+                  } finally {
+                    this.consumer.resume([{ topic, partitions: [partition] }]);
+                  }
                 }
               }
-            }
-            let outcome: import('../../application/use-cases/saga-event.handler').EventOutcome;
-            let lastError = 'Event processing failed';
-            try {
-              outcome = await this.handler.handle(parsed);
-            } catch (error) {
-              lastError = error instanceof Error ? error.message : String(error);
-              this.pino.error(
-                { err: error, eventId, correlationId, ordemServicoId: orderId },
-                'Saga event failed'
+              let outcome: import('../../application/use-cases/saga-event.handler').EventOutcome;
+              let lastError = 'Event processing failed';
+              try {
+                outcome = await this.handler.handle(parsed);
+              } catch (error) {
+                lastError = error instanceof Error ? error.message : String(error);
+                this.pino.error(
+                  { err: error, eventId, correlationId, ordemServicoId: orderId },
+                  'Saga event failed'
+                );
+                outcome = 'retryable';
+              }
+              this.pino.info(
+                { eventId, correlationId, ordemServicoId: orderId, outcome },
+                'Saga event handled'
               );
-              outcome = 'retryable';
-            }
-            this.pino.info(
-              { eventId, correlationId, ordemServicoId: orderId, outcome },
-              'Saga event handled'
-            );
-            const attemptsCompleted = parsed.retry?.attempt ?? 0;
-            const deliveryNumber = attemptsCompleted + 1;
-            const decision = retryDecision(outcome, deliveryNumber);
-            if (decision === 'done') return;
-            if (decision === 'dlt') {
+              const attemptsCompleted = parsed.retry?.attempt ?? 0;
+              const deliveryNumber = attemptsCompleted + 1;
+              const decision = retryDecision(outcome, deliveryNumber);
+              if (decision === 'done') return;
+              if (decision === 'dlt') {
+                await this.send(
+                  DLT_TOPIC,
+                  orderId ?? '',
+                  JSON.stringify({
+                    ...parsed,
+                    lastError:
+                      outcome === 'business-error'
+                        ? 'Invalid event payload or Saga stage'
+                        : lastError,
+                    retry: {
+                      attempt: Math.min(deliveryNumber, MAX_ATTEMPTS),
+                      firstFailedAt: parsed.retry?.firstFailedAt ?? new Date().toISOString(),
+                      notBefore: parsed.retry?.notBefore ?? new Date().toISOString(),
+                    },
+                  })
+                );
+                return;
+              }
+              const delayMs = RETRY_DELAYS_MS[deliveryNumber - 1];
               await this.send(
-                DLT_TOPIC,
+                RETRY_TOPIC,
                 orderId ?? '',
                 JSON.stringify({
                   ...parsed,
-                  lastError:
-                    outcome === 'business-error'
-                      ? 'Invalid event payload or Saga stage'
-                      : lastError,
                   retry: {
-                    attempt: Math.min(deliveryNumber, MAX_ATTEMPTS),
+                    attempt: deliveryNumber,
                     firstFailedAt: parsed.retry?.firstFailedAt ?? new Date().toISOString(),
-                    notBefore: parsed.retry?.notBefore ?? new Date().toISOString(),
+                    notBefore: new Date(Date.now() + delayMs).toISOString(),
                   },
+                  lastError,
                 })
               );
-              return;
             }
-            const delayMs = RETRY_DELAYS_MS[deliveryNumber - 1];
-            await this.send(
-              RETRY_TOPIC,
-              orderId ?? '',
-              JSON.stringify({
-                ...parsed,
-                retry: {
-                  attempt: deliveryNumber,
-                  firstFailedAt: parsed.retry?.firstFailedAt ?? new Date().toISOString(),
-                  notBefore: new Date(Date.now() + delayMs).toISOString(),
-                },
-                lastError,
-              })
-            );
-          }
-        );
-      },
+          );
+        }),
     });
   }
 
@@ -247,7 +253,11 @@ export class KafkaSagaEventConsumer implements OnModuleInit, OnModuleDestroy {
   }
 
   private async send(topic: string, key: string | undefined, value: string): Promise<void> {
-    await this.producer.send({ topic, acks: -1, messages: [{ key, value }] });
+    await this.producer.send({
+      topic,
+      acks: -1,
+      messages: [{ key, value, headers: injetarHeadersTrace() }],
+    });
   }
 
   private async sendInvalidEnvelope(

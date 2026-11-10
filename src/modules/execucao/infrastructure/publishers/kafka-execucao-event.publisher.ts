@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { PinoLogger } from 'nestjs-pino';
 import { EventoExecucao } from '../../domain/events/execucao.events';
 import { IExecucaoEventPublisher } from '../../domain/ports/execucao-event-publisher';
+import { injetarHeadersTrace } from '../../../../shared/infrastructure/observability/kafka-trace';
 
 @Injectable()
 export class KafkaExecucaoEventPublisher implements IExecucaoEventPublisher, OnModuleDestroy {
@@ -53,6 +54,7 @@ export class KafkaExecucaoEventPublisher implements IExecucaoEventPublisher, OnM
         messages: [
           {
             key: evento.data.ordemServicoId,
+            headers: injetarHeadersTrace(),
             value: JSON.stringify({
               eventId,
               eventType: evento.eventType,
