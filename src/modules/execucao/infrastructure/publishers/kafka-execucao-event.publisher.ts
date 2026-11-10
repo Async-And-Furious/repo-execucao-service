@@ -38,6 +38,13 @@ export class KafkaExecucaoEventPublisher implements IExecucaoEventPublisher, OnM
         : 'reparoIniciadoEm' in evento.data
           ? evento.data.reparoIniciadoEm
           : evento.data.concluidaEm;
+    const eventId = randomUUID();
+    const logFields = {
+      ordemServicoId: evento.data.ordemServicoId,
+      eventId,
+      eventType: evento.eventType,
+      correlationId: evento.correlationId,
+    };
     try {
       await this.connect();
       await this.producer.send({
@@ -47,7 +54,7 @@ export class KafkaExecucaoEventPublisher implements IExecucaoEventPublisher, OnM
           {
             key: evento.data.ordemServicoId,
             value: JSON.stringify({
-              eventId: randomUUID(),
+              eventId,
               eventType: evento.eventType,
               eventVersion: 1,
               occurredAt,
@@ -58,15 +65,9 @@ export class KafkaExecucaoEventPublisher implements IExecucaoEventPublisher, OnM
           },
         ],
       });
+      this.pino.info(logFields, 'Saga event published');
     } catch (error) {
-      this.pino.error(
-        {
-          ordemServicoId: evento.data.ordemServicoId,
-          eventType: evento.eventType,
-          correlationId: evento.correlationId,
-        },
-        'Saga event publish failed after database commit'
-      );
+      this.pino.error(logFields, 'Saga event publish failed after database commit');
       throw error;
     }
   }
