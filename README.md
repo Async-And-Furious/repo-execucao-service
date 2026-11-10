@@ -16,7 +16,7 @@ PostgreSQL, banco `execucao_producao`, role `execucao_app` na instancia RDS unic
 
 ## Estratégia de Saga
 
-O fluxo de Ordem de Serviço é coordenado por uma Saga coreografada (ADR-0016): não há orquestrador nem chamadas REST entre microsserviços. Cada serviço publica e consome eventos Kafka com correlationId = ordemServicoId. Esta escolha reduz acoplamento síncrono, mas abre mão de uma visão central do estado da Saga e de um único ponto de timeout; cada serviço responde por suas transições, retries e compensações. Veja a [ADR-0016: Saga coreografada](https://github.com/Async-And-Furious/async-furious-project/blob/develop/docs/adr/0016-saga-coreografada.md) e o [fluxo completo da Saga](https://github.com/Async-And-Furious/async-furious-project/blob/develop/docs/architecture/saga-flow.md). Variáveis de ambiente do Kafka e SASL: veja "Dependências de entrada e configuração" em [docs/architecture.md](docs/architecture.md).
+O fluxo de Ordem de Serviço é coordenado por uma Saga coreografada (ADR-0016): não há orquestrador nem chamadas REST entre microsserviços. Cada serviço publica e consome eventos Kafka com correlationId = ordemServicoId. Esta escolha reduz acoplamento síncrono, mas abre mão de uma visão central do estado da Saga e de um único ponto de timeout; cada serviço responde por suas transições, retries e compensações. Veja a [ADR-0016 — Saga coreografada](https://github.com/Async-And-Furious/async-furious-project/blob/develop/docs/adr/0016-saga-coreografada.md) e o [fluxo completo da Saga](https://github.com/Async-And-Furious/async-furious-project/blob/develop/docs/architecture/saga-flow.md).
 
 ## Autenticacao
 
@@ -73,7 +73,9 @@ Manifests em `k8s/`: namespace `execucao`, Deployment, Service, migration Job, c
 
 ## Recuperacao de publicacao da Saga
 
-As transicoes sao persistidas com compare-and-swap antes da publicacao Kafka. Se o publish falhar depois do commit, o publisher registra `ordemServicoId`, `eventType` e `correlationId` e propaga o erro. Reprocessar Kafka nao recupera uma mensagem que nunca chegou ao broker. Este servico nao possui endpoint webhook de recuperacao; reconciliacao e manual entre OS e Execucao, ate existir procedimento aprovado. Este PR nao alega replay automatico.
+As transicoes sao persistidas com compare-and-swap antes da publicacao Kafka. Se o publish falhar depois do commit, o publisher registra `ordemServicoId`, `eventType` e `correlationId` e propaga o erro. Reprocessar Kafka nao recupera uma mensagem que nunca chegou ao broker.
+
+Como fallback operacional do **OS Service** (nao deste servico), existe `POST /api/v1/webhooks/service-orders/status`. Ele exige o header `x-webhook-secret`, comparado em tempo constante com `WEBHOOK_SECRET`; segredo ausente ou divergente retorna 401. O corpo valida `osId` UUID, `status` e `motivo` opcional. O OS permite apenas: `RECEIVED` → `UNDER_DIAGNOSIS` ou `CLOSED_WITHOUT_EXECUTION`; `UNDER_DIAGNOSIS` → `AWAITING_APPROVAL` ou `CLOSED_WITHOUT_EXECUTION`; `AWAITING_APPROVAL` → `IN_PROGRESS` ou `CLOSED_WITHOUT_EXECUTION`; `IN_PROGRESS` → `AWAITING_PARTS` ou `FINISHED`; `AWAITING_PARTS` → `IN_PROGRESS`. O webhook rejeita `DELIVERED`; a entrega usa `registrar-entrega`. `DELIVERED` e `CLOSED_WITHOUT_EXECUTION` nao tem transicoes de saida. O endpoint altera status/historico da OS e emite somente os eventos normais das transicoes que os possuem. **Nao e webhook da Execucao:** nao republica evento Kafka perdido, nao altera automaticamente o estado da Execucao e nao garante a recuperacao da Saga inteira.
 
 ## Observabilidade — onboarding parcial (#343)
 
