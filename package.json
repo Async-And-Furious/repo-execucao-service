@@ -18,6 +18,7 @@
     "type:check": "tsc --noEmit",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "test": "jest",
+    "openapi:export": "ts-node -r tsconfig-paths/register scripts/export-openapi.ts",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "db:seed": "prisma db execute --file prisma/seed.sql --schema prisma/schema.prisma"

@@ -1,0 +1,41 @@
+name: OpenAPI
+
+# Garante que docs/openapi.json bate com os decorators (#350). O CI completo fica para a Feature de Testes e Pipeline.
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  openapi:
+    name: openapi
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Instalar dependências
+        run: pnpm install --frozen-lockfile
+
+      - name: Gerar cliente Prisma
+        run: pnpm exec prisma generate
+
+      - name: Gerar e verificar contrato OpenAPI versionado
+        run: |
+          pnpm openapi:export
+          git diff --exit-code -- docs/openapi.json
+
+      - name: Rotas públicas do contrato
+        run: pnpm exec jest test/openapi-public-routes.spec.ts
