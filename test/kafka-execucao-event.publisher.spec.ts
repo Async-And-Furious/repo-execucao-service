@@ -3,7 +3,7 @@ const mockProducer = {
   send: jest.fn().mockResolvedValue(undefined),
   disconnect: jest.fn(),
 };
-const logger = { error: jest.fn() };
+const logger = { info: jest.fn(), error: jest.fn() };
 interface MockKafkaInstance {
   options: Record<string, unknown>;
   producer: jest.Mock<unknown, unknown[]>;
@@ -112,6 +112,33 @@ describe('KafkaExecucaoEventPublisher', () => {
     ).toThrow('Both KAFKA_SASL_USERNAME and KAFKA_SASL_PASSWORD are required');
   });
 
+  it('logs the same eventId as the broker envelope on success', async () => {
+    const publisher = new KafkaExecucaoEventPublisher(
+      { get: () => undefined } as never,
+      logger as never
+    );
+    const event = new DiagnosticoIniciado({
+      execucaoId: 'ex-1',
+      ordemServicoId: 'os-1',
+      responsavelId: null,
+      diagnosticoIniciadoEm: '2026-11-01T00:00:00.000Z',
+    });
+
+    await publisher.publish(event);
+    const envelope = JSON.parse(String(mockProducer.send.mock.calls[0][0].messages[0].value)) as {
+      eventId: string;
+    };
+    expect(logger.info).toHaveBeenCalledWith(
+      {
+        ordemServicoId: 'os-1',
+        eventId: envelope.eventId,
+        eventType: 'DiagnosticoIniciado',
+        correlationId: 'os-1',
+      },
+      'Saga event published'
+    );
+  });
+
   it('logs safe correlation fields and rethrows a publish failure', async () => {
     const error = new Error('broker unavailable');
     mockProducer.send.mockRejectedValueOnce(error);
@@ -128,7 +155,12 @@ describe('KafkaExecucaoEventPublisher', () => {
 
     await expect(publisher.publish(event)).rejects.toBe(error);
     expect(logger.error).toHaveBeenCalledWith(
-      { ordemServicoId: 'os-1', eventType: 'DiagnosticoIniciado', correlationId: 'os-1' },
+      {
+        ordemServicoId: 'os-1',
+        eventId: expect.any(String),
+        eventType: 'DiagnosticoIniciado',
+        correlationId: 'os-1',
+      },
       'Saga event publish failed after database commit'
     );
   });
