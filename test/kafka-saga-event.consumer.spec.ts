@@ -33,13 +33,27 @@ jest.mock('kafkajs', () => ({
 jest.mock('../src/modules/execucao/application/use-cases/saga-event.handler', () => ({
   SagaEventHandler: jest.fn().mockImplementation(() => ({ handle: mockHandle })),
 }));
+const TRACEPARENT = '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01';
+const mockTransacao = {
+  insertDistributedTraceHeaders: jest.fn<void, [Record<string, string>]>(),
+  acceptDistributedTraceHeaders: jest.fn<void, [string, Record<string, string>]>(),
+};
+const mockStartBackgroundTransaction = jest.fn<
+  Promise<unknown>,
+  [string, string, () => Promise<unknown>]
+>();
+jest.mock('newrelic', () => ({
+  getTransaction: () => mockTransacao,
+  startBackgroundTransaction: (nome: string, grupo: string, handle: () => Promise<unknown>) =>
+    mockStartBackgroundTransaction(nome, grupo, handle),
+}));
 
 import { KafkaSagaEventConsumer } from '../src/modules/execucao/infrastructure/consumers/kafka-saga-event.consumer';
 
 type EachMessage = (payload: {
   topic: string;
   partition: number;
-  message: { key: Buffer | null; value: Buffer | null };
+  message: { key: Buffer | null; value: Buffer | null; headers?: Record<string, Buffer> };
   heartbeat: () => Promise<void>;
 }) => Promise<void>;
 const orderId = 'order-123';
@@ -65,6 +79,10 @@ describe('KafkaSagaEventConsumer', () => {
     jest.clearAllMocks();
     mockKafkaInstances.length = 0;
     mockHandle.mockResolvedValue('processed');
+    mockTransacao.insertDistributedTraceHeaders.mockImplementation((headers) => {
+      headers.traceparent = TRACEPARENT;
+    });
+    mockStartBackgroundTransaction.mockImplementation((_nome, _grupo, handle) => handle());
     consumer = new KafkaSagaEventConsumer(config as never, {} as never, logger as never);
   });
   afterAll(() => {
@@ -79,13 +97,15 @@ describe('KafkaSagaEventConsumer', () => {
   async function deliver(
     value: unknown,
     topic = 'billing.eventos.v1',
-    key: string | null = orderId
+    key: string | null = orderId,
+    headers?: Record<string, Buffer>
   ): Promise<void> {
     await eachMessage({
       topic,
       partition: 2,
       message: {
         key: key === null ? null : Buffer.from(key),
+        headers,
         value:
           value === null
             ? null
@@ -194,6 +214,62 @@ describe('KafkaSagaEventConsumer', () => {
     });
     expect(Date.parse(secondRetry.retry.notBefore) - Date.now()).toBeGreaterThanOrEqual(59_990);
     expect(Date.parse(secondRetry.retry.notBefore) - Date.now()).toBeLessThanOrEqual(60_000);
+  });
+
+  it('consome cada mensagem numa background transaction do tópico, aceitando os headers de trace', async () => {
+    await start();
+    await deliver(envelope(), 'billing.eventos.v1', orderId, {
+      traceparent: Buffer.from(TRACEPARENT),
+    });
+    expect(mockStartBackgroundTransaction).toHaveBeenCalledWith(
+      'billing.eventos.v1',
+      'Kafka',
+      expect.any(Function)
+    );
+    expect(mockTransacao.acceptDistributedTraceHeaders).toHaveBeenCalledWith('Kafka', {
+      traceparent: TRACEPARENT,
+    });
+  });
+
+  it('o eachMessage só resolve depois do handler (o offset não é confirmado antes)', async () => {
+    let liberar!: () => void;
+    mockHandle.mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          liberar = () => resolve('processed');
+        })
+    );
+    await start();
+    let resolveu = false;
+    const pendente = deliver(envelope()).then(() => {
+      resolveu = true;
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(mockHandle).toHaveBeenCalledTimes(1);
+    expect(resolveu).toBe(false);
+
+    liberar();
+    await pendente;
+    expect(resolveu).toBe(true);
+  });
+
+  it('o retry sai com os headers de trace da transação de consumo', async () => {
+    mockHandle.mockResolvedValue('retryable');
+    await start();
+    await deliver(envelope(), 'billing.eventos.v1', orderId, {
+      traceparent: Buffer.from(TRACEPARENT),
+    });
+    expect(sent()[0]).toMatchObject({
+      topic: 'execucao.retry.v1',
+      messages: [expect.objectContaining({ headers: { traceparent: TRACEPARENT } })],
+    });
+  });
+
+  it('falha ao enviar o retry propaga ao kafkajs, que entrega a mensagem de novo', async () => {
+    mockHandle.mockResolvedValue('retryable');
+    mockProducer.send.mockRejectedValueOnce(new Error('broker indisponível'));
+    await start();
+    await expect(deliver(envelope())).rejects.toThrow('broker indisponível');
   });
 
   it('sends business errors immediately to DLT', async () => {

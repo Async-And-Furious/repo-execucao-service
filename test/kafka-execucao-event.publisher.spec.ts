@@ -18,6 +18,16 @@ jest.mock('kafkajs', () => ({
   }),
 }));
 
+const TRACEPARENT = '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01';
+const mockTransacao = {
+  insertDistributedTraceHeaders: jest.fn<void, [Record<string, string>]>(),
+  acceptDistributedTraceHeaders: jest.fn(),
+};
+jest.mock('newrelic', () => ({
+  getTransaction: () => mockTransacao,
+  startBackgroundTransaction: (_nome: string, _grupo: string, handle: () => unknown) => handle(),
+}));
+
 import { KafkaExecucaoEventPublisher } from '../src/modules/execucao/infrastructure/publishers/kafka-execucao-event.publisher';
 import { DiagnosticoIniciado } from '../src/modules/execucao/domain/events/execucao.events';
 
@@ -25,6 +35,48 @@ describe('KafkaExecucaoEventPublisher', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockKafkaInstances.length = 0;
+    mockTransacao.insertDistributedTraceHeaders.mockImplementation(() => undefined);
+  });
+
+  it('grava na mensagem os headers de trace da transação ativa', async () => {
+    mockTransacao.insertDistributedTraceHeaders.mockImplementation((headers) => {
+      headers.traceparent = TRACEPARENT;
+    });
+    const publisher = new KafkaExecucaoEventPublisher(
+      { get: (key: string) => (key === 'KAFKA_BROKERS' ? 'kafka:9092' : undefined) } as never,
+      logger as never
+    );
+
+    await publisher.publish(
+      new DiagnosticoIniciado({
+        execucaoId: 'ex-1',
+        ordemServicoId: 'os-1',
+        responsavelId: null,
+        diagnosticoIniciadoEm: '2026-11-01T00:00:00.000Z',
+      })
+    );
+
+    expect(mockProducer.send.mock.calls[0][0].messages[0].headers).toEqual({
+      traceparent: TRACEPARENT,
+    });
+  });
+
+  it('sem transação ativa publica com headers vazios, sem quebrar', async () => {
+    const publisher = new KafkaExecucaoEventPublisher(
+      { get: (key: string) => (key === 'KAFKA_BROKERS' ? 'kafka:9092' : undefined) } as never,
+      logger as never
+    );
+
+    await publisher.publish(
+      new DiagnosticoIniciado({
+        execucaoId: 'ex-1',
+        ordemServicoId: 'os-1',
+        responsavelId: null,
+        diagnosticoIniciadoEm: '2026-11-01T00:00:00.000Z',
+      })
+    );
+
+    expect(mockProducer.send.mock.calls[0][0].messages[0].headers).toEqual({});
   });
 
   it('publishes the ADR envelope keyed and correlated by order ID with idempotence and acks=-1', async () => {

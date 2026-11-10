@@ -108,6 +108,15 @@ O log tardio de "request completed" do pino-http pode nao carregar `trace.id`.
 O trace comeca no primeiro servico: **API Gateway → Lambda/Authorizer nao e
 coberto**. `trace.id` nao substitui o `correlationId=ordemServicoId` dos eventos.
 
+Trace pelo Kafka (#344): a instrumentacao automatica do kafkajs fica desligada
+(na 14.x o wrapper do `eachMessage` nao devolve a promise do handler e o offset
+seria confirmado antes do processamento). O publicador grava `traceparent`,
+`tracestate` e `newrelic` nos headers da mensagem, dentro da transacao ativa. O
+consumidor abre uma background transaction `Kafka/<topico>` que aceita esses
+headers e aguarda o processamento. Retry e DLT tambem levam os headers. A
+transacao de consumo inclui a espera do retry (30 s e 60 s): a duracao no APM
+nao e so o tempo de processamento. Sem agente ativo, as chamadas viram no-op.
+
 Exemplo de teste local isolado, com Node 22 e pnpm 10.18.3, sem key ou servicos externos:
 
 ```bash
