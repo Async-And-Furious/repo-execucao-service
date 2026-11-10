@@ -99,6 +99,10 @@ Fornecer estas variaveis **antes de iniciar o processo**: o `ConfigModule` le
 | `NEW_RELIC_LOG` | `stdout` | `stdout` |
 
 O log do agente usa stdout para nao exigir escrita no container nao-root.
+A feature flag `kafkajs_instrumentation` do agente fica desligada de proposito: na
+versao 14.x, o wrapper do `eachMessage` nao devolve a promise do handler, e o kafkajs
+confirmaria o offset antes do processamento. O trace pelo broker deve propagar os
+headers no codigo (#344).
 Forwarding pelo agente fica desligado para nao duplicar o envio pelo Fluent Bit.
 O log tardio de "request completed" do pino-http pode nao carregar `trace.id`.
 O trace comeca no primeiro servico: **API Gateway → Lambda/Authorizer nao e

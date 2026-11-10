@@ -31,6 +31,8 @@ describe('New Relic onboarding contract', () => {
       expect(config).toMatch(new RegExp(`^  ${key}: ['"]${value}['"]$`, 'm'));
     }
     expect(config).not.toContain('NEW_RELIC_LICENSE_KEY');
+    // newrelic 14.x: o wrapper do eachMessage não devolve a promise; o kafkajs confirmaria o offset cedo.
+    expect(config).not.toMatch(/^\s*NEW_RELIC_FEATURE_FLAG_KAFKAJS_INSTRUMENTATION:\s*['"]?true/m);
     expect(config).not.toMatch(/^\s*NEW_RELIC_ENABLED:\s*['"]?false/m);
     for (const filename of ['newrelic.js', 'newrelic.cjs']) {
       expect(existsSync(resolve(root, filename))).toBe(false);
