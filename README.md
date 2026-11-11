@@ -1,5 +1,7 @@
 # repo-execucao-service
 
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=Async-And-Furious_repo-execucao-service&metric=coverage)](https://sonarcloud.io/summary/new_code?id=Async-And-Furious_repo-execucao-service) [![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=Async-And-Furious_repo-execucao-service&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=Async-And-Furious_repo-execucao-service)
+
 Servico de Execucao e Producao do Tech Challenge Fase 4 (FIAP 15SOAT). Feature #319 do repositorio `async-furious-project`.
 
 Stack: NestJS 10, Prisma 5, PostgreSQL, Node 22, pnpm. Quatro camadas por modulo (`domain`, `application`, `infrastructure`, `presentation`) mais `shared/`.
@@ -69,7 +71,50 @@ NEW_RELIC_ENABLED=false NEW_RELIC_NO_CONFIG_FILE=true NEW_RELIC_LICENSE_KEY= \
 
 ## Kubernetes
 
-Manifests em `k8s/`: namespace `execucao`, Deployment, Service, migration Job, configmap e secret. Namespace, ECR proprio e banco/role sao provisionados pelo Epic #312. Workflows de CI/CD e protecao de branch ficam para a Feature de Testes e Pipeline.
+Manifests em `k8s/`: Deployment, Service, TargetGroupBinding, HPA, migration Job, configmap e secret, com placeholders `${nome}` preenchidos pelo deploy (`scripts/deploy/render-k8s.mjs`). Namespace, ECR proprio, target group e banco/role sao provisionados pelo `repo-k8s-infra` e pelo `repo-db-infra`; `k8s/namespace.yaml` fica so como referencia, o deploy nao o aplica.
+
+## Cobertura de testes (#351)
+
+Mínimo de 80% em statements, branches, functions e lines (`jest.config.js`, ADR-0014 do `async-furious-project`), verificado pelo `pnpm test:cov` do job `tests` do `ci.yml` em todo PR. Badge e relatório no [SonarCloud](https://sonarcloud.io/summary/new_code?id=Async-And-Furious_repo-execucao-service). Última coleta no CI:
+
+| Data | Execução | Commit | Statements | Branches | Functions | Lines |
+|---|---|---|---|---|---|---|
+| 11/11/2026 | [ci.yml #43032065563](https://github.com/Async-And-Furious/repo-execucao-service/actions/runs/43032065563) | `776c37b` | 95,70% | 82,58% | 95,04% | 96,09% |
+
+## Esteira de CI/CD (#328)
+
+Copia da esteira do `repo-billing` (#327), independente de qualquer outro servico.
+
+### `ci.yml`: checks obrigatorios da `main`
+
+Roda em PR e em push para `main` e `develop`. Substitui o antigo `openapi.yml`: a verificacao do contrato OpenAPI e o teste de rotas publicas rodam dentro do `tests`.
+
+| Check | O que faz | Bloqueia? |
+|---|---|---|
+| `tests` | `prisma generate`, contrato OpenAPI sem diff, lint, `pnpm type:check`, `pnpm test:cov` (gate 80/80/80/80 do `jest.config.js`) e `pnpm build`. Publica `coverage/lcov.info` | Sim |
+| `sonar` | SonarCloud com o lcov do `tests` (`sonar-project.properties`, projeto `Async-And-Furious_repo-execucao-service`) | Quality Gate bloqueante so no push em `main` |
+| `trivy` | Build da imagem e scan de HIGH/CRITICAL (tabela e SARIF) | Relatorio sempre; gate final informativo, como no Billing |
+
+Sem o job `validate` de transicao do Billing: a protecao da `main` deste repositorio nasce exigindo `tests`, `sonar` e `trivy`. O `test/processed-events-migration.integration.sh` continua manual (precisa de Docker e `psql` locais).
+
+### `deploy-eks.yml`: deploy HML isolado
+
+Dispara em push para `main` que altere codigo, `prisma/`, `k8s/`, `scripts/deploy/`, `Dockerfile`, dependencias ou o proprio workflow, e manualmente (`workflow_dispatch`, so na `main`).
+
+1. **`image`**: build e push para o ECR `tc3-execucao-hml` (nome lido do state do `repo-k8s-infra`), tag = SHA do commit, referencia final por digest.
+2. **`deploy-hml`**: resolve cluster, target group e banco (`scripts/deploy/infra.sh infra`); le a senha do banco em `tc3-db-execucao-hml`, a do Kafka em `tc3/kafka/hml` e a chave publica JWT no SSM (`infra.sh segredos`); libera temporariamente o IP do runner no endpoint do EKS e, no fim, remove so o proprio `/32` (cenarios em `scripts/deploy/infra-eks-acesso.spec.ts`); confere o namespace `execucao`; aplica ConfigMap e Secret; roda a migration (`execucao-migrate`) antes do rollout; aplica Deployment, Service, **TargetGroupBinding** (sem ele o target do Execucao no ALB fica com 0 alvos) e HPA, e espera o `rollout status`.
+
+### Secrets e variaveis (GitHub Environment `hml`)
+
+| Nome | Tipo | Uso |
+|---|---|---|
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | secret | credencial IAM de deploy do grupo |
+| `NEW_RELIC_LICENSE_KEY` | secret | `execucao-secret` (#343); a mesma do monolito e do Billing. Sem ela o `infra.sh` aborta antes de abrir o EKS |
+| `JWT_PUBLIC_KEY_PARAMETER_NAME` | variavel | parametro SSM com a chave publica RS256 |
+| `KAFKA_BROKERS`, `KAFKA_SASL_USERNAME` | variavel, opcional | padrao `kafka.kafka.svc.cluster.local:9092` e `app` |
+| `SONAR_TOKEN` | secret **de repositorio** | job `sonar` |
+
+**Protecao da `main`** (Settings > Branches): PR obrigatorio, uma aprovacao e os checks `tests`, `sonar` e `trivy`. A `main` deste repositorio ainda esta no commit inicial; o deploy so acontece depois do merge de `develop` em `main`.
 
 ## Recuperacao de publicacao da Saga
 
@@ -134,7 +179,8 @@ Nao houve consulta atual a esse dashboard nem validacao HML neste incremento.
 **Entrega parcial de #343 — nao fecha a issue.** Ainda faltam onboarding do
 Billing (sem base `develop`), distribuicao autorizada da key por secret de
 organizacao (ou fallback aprovado com verificacao bloqueante antes do deploy),
-injecao no container pela esteira de #328 e confirmacao das tres entidades APM.
+confirmacao das tres entidades APM. A injecao no container pela esteira ja
+existe (#328: `NEW_RELIC_LICENSE_KEY` no `execucao-secret`).
 O Deployment ja recebe `execucao-secret` por `envFrom`; este incremento nao
 altera secrets ou workflows e nao esta pronto para aceite HML sem essa integracao.
 Com #344/#337, validar um trace real OS → Kafka → Execucao por
