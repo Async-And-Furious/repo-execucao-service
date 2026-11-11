@@ -1,5 +1,7 @@
 # repo-execucao-service
 
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=Async-And-Furious_repo-execucao-service&metric=coverage)](https://sonarcloud.io/summary/new_code?id=Async-And-Furious_repo-execucao-service) [![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=Async-And-Furious_repo-execucao-service&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=Async-And-Furious_repo-execucao-service)
+
 Servico de Execucao e Producao do Tech Challenge Fase 4 (FIAP 15SOAT). Feature #319 do repositorio `async-furious-project`.
 
 Stack: NestJS 10, Prisma 5, PostgreSQL, Node 22, pnpm. Quatro camadas por modulo (`domain`, `application`, `infrastructure`, `presentation`) mais `shared/`.
@@ -70,6 +72,14 @@ NEW_RELIC_ENABLED=false NEW_RELIC_NO_CONFIG_FILE=true NEW_RELIC_LICENSE_KEY= \
 ## Kubernetes
 
 Manifests em `k8s/`: Deployment, Service, TargetGroupBinding, HPA, migration Job, configmap e secret, com placeholders `${nome}` preenchidos pelo deploy (`scripts/deploy/render-k8s.mjs`). Namespace, ECR proprio, target group e banco/role sao provisionados pelo `repo-k8s-infra` e pelo `repo-db-infra`; `k8s/namespace.yaml` fica so como referencia, o deploy nao o aplica.
+
+## Cobertura de testes (#351)
+
+Mínimo de 80% em statements, branches, functions e lines (`jest.config.js`, ADR-0014 do `async-furious-project`), verificado pelo `pnpm test:cov` do job `tests` do `ci.yml` em todo PR. Badge e relatório no [SonarCloud](https://sonarcloud.io/summary/new_code?id=Async-And-Furious_repo-execucao-service). Última coleta no CI:
+
+| Data | Execução | Commit | Statements | Branches | Functions | Lines |
+|---|---|---|---|---|---|---|
+| 11/11/2026 | [ci.yml #43032065563](https://github.com/Async-And-Furious/repo-execucao-service/actions/runs/43032065563) | `776c37b` | 95,70% | 82,58% | 95,04% | 96,09% |
 
 ## Esteira de CI/CD (#328)
 
