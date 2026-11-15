@@ -1,0 +1,14 @@
+# Registra os pods do Execução no target group do ALB interno (repo-k8s-infra, ADR-0020). Sem ele,
+# o target do Execução no ALB fica com 0 alvos (#328). O pipeline preenche ${target_group_arn} a
+# partir do state do repo-k8s-infra.
+apiVersion: elbv2.k8s.aws/v1beta1
+kind: TargetGroupBinding
+metadata:
+  name: execucao-api
+  namespace: execucao
+spec:
+  targetGroupARN: ${target_group_arn}
+  targetType: ip
+  serviceRef:
+    name: execucao-service
+    port: 3000

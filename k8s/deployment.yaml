@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: execucao-api
+  namespace: execucao
+spec:
+  # Sem replicas: o HPA (2 a 3) decide. Com o valor fixo, cada kubectl apply voltaria para 2; e o
+  # renderer põe o valor entre aspas, o que o campo inteiro não aceita.
+  selector:
+    matchLabels:
+      app: execucao-api
+  template:
+    metadata:
+      labels:
+        app: execucao-api
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: api
+          image: ${app_image}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+          resources:
+            requests:
+              cpu: '100m'
+              memory: '128Mi'
+              ephemeral-storage: '256Mi'
+            limits:
+              cpu: '500m'
+              memory: '512Mi'
+              ephemeral-storage: '512Mi'
+          envFrom:
+            - configMapRef:
+                name: execucao-config
+            - secretRef:
+                name: execucao-secret
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health/ready
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health/live
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          startupProbe:
+            httpGet:
+              path: /api/v1/health/live
+              port: 3000
+            failureThreshold: 30
+            periodSeconds: 5

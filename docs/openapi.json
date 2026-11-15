@@ -1,0 +1,328 @@
+{
+  "openapi": "3.0.0",
+  "paths": {
+    "/api/v1/execucoes": {
+      "get": {
+        "operationId": "ExecucaoController_listar",
+        "parameters": [
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "description": "Sem status, lista AGUARDANDO_DIAGNOSTICO e AGUARDANDO_REPARO",
+            "schema": {
+              "enum": [
+                "AGUARDANDO_DIAGNOSTICO",
+                "EM_DIAGNOSTICO",
+                "AGUARDANDO_REPARO",
+                "EM_REPARO",
+                "CONCLUIDA",
+                "CANCELADA"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "name": "responsavelId",
+            "required": false,
+            "in": "query",
+            "description": "sub do JWT do mecanico responsavel",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ExecucaoResponseDto"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Fila de execucao por status, ordenada por createdAt",
+        "tags": [
+          "Execucoes"
+        ]
+      }
+    },
+    "/api/v1/execucoes/{id}/iniciar-diagnostico": {
+      "patch": {
+        "operationId": "ExecucaoController_iniciarDiagnostico",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecucaoResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "AGUARDANDO_DIAGNOSTICO -> EM_DIAGNOSTICO; responsavel = sub do token",
+        "tags": [
+          "Execucoes"
+        ]
+      }
+    },
+    "/api/v1/execucoes/{id}/iniciar-reparo": {
+      "patch": {
+        "operationId": "ExecucaoController_iniciarReparo",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecucaoResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "AGUARDANDO_REPARO -> EM_REPARO",
+        "tags": [
+          "Execucoes"
+        ]
+      }
+    },
+    "/api/v1/execucoes/{id}/concluir": {
+      "patch": {
+        "operationId": "ExecucaoController_concluir",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecucaoResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "EM_REPARO -> CONCLUIDA",
+        "tags": [
+          "Execucoes"
+        ]
+      }
+    },
+    "/api/v1/health": {
+      "get": {
+        "description": "Returns the health status of the API",
+        "operationId": "HealthController_check",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "API is healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Health check",
+        "tags": [
+          "Health"
+        ]
+      }
+    },
+    "/api/v1/health/live": {
+      "get": {
+        "operationId": "HealthController_live",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Health"
+        ]
+      }
+    },
+    "/api/v1/health/ready": {
+      "get": {
+        "operationId": "HealthController_ready",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Health"
+        ]
+      }
+    }
+  },
+  "info": {
+    "title": "Async Furious - Execucao e Producao",
+    "description": "Servico de Execucao e Producao",
+    "version": "1.0.0",
+    "contact": {}
+  },
+  "tags": [],
+  "servers": [],
+  "components": {
+    "securitySchemes": {
+      "bearer": {
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "type": "http"
+      }
+    },
+    "schemas": {
+      "ExecucaoResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ordemServicoId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "AGUARDANDO_DIAGNOSTICO",
+              "EM_DIAGNOSTICO",
+              "AGUARDANDO_REPARO",
+              "EM_REPARO",
+              "CONCLUIDA",
+              "CANCELADA"
+            ]
+          },
+          "responsavelId": {
+            "type": "string",
+            "nullable": true,
+            "description": "sub do JWT de quem iniciou o diagnostico"
+          },
+          "diagnosticoIniciadoEm": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "reparoIniciadoEm": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "concluidaEm": {
+            "format": "date-time",
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "ordemServicoId",
+          "status",
+          "responsavelId",
+          "diagnosticoIniciadoEm",
+          "reparoIniciadoEm",
+          "concluidaEm",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "HealthResponseDto": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "Health status",
+            "example": "ok"
+          },
+          "timestamp": {
+            "type": "string",
+            "description": "Current server timestamp in ISO format",
+            "example": "2025-01-01T00:00:00.000Z"
+          },
+          "version": {
+            "type": "string",
+            "description": "API version",
+            "example": "1.0.0"
+          }
+        },
+        "required": [
+          "status",
+          "timestamp",
+          "version"
+        ]
+      }
+    }
+  }
+}
