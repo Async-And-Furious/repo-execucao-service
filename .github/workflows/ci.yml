@@ -84,8 +84,10 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: https://sonarcloud.io
         with:
-          # Quality Gate bloqueante só em main; em PR a análise é informativa (decoração do PR).
-          args: ${{ github.event_name == 'push' && '-Dsonar.qualitygate.wait=true' || '' }}
+          # Gate bloqueante só no push da main. A organização no SonarCloud não pode ler o Quality
+          # Gate de outras branches ("not allowed to access data from non main branches"): esperar
+          # o gate no push da develop deixava o CI dela sempre vermelho.
+          args: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && '-Dsonar.qualitygate.wait=true' || '' }}
 
   trivy:
     name: trivy
